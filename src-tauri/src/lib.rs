@@ -7,6 +7,7 @@ mod download;
 mod extras;
 mod mysql_manager;
 mod php_manager;
+mod platform;
 mod postgres_manager;
 mod project;
 mod runtime;

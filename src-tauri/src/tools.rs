@@ -4,6 +4,12 @@
 //! comuns do Homebrew e, por fim, o `PATH`. As versões do PHP gerenciadas ficam em
 //! `~/LocalTusk/bin/php/<versão>/` (ver `php_manager`).
 
+/// Pastas do sistema onde executáveis do PHP, do Caddy e dos bancos podem estar.
+#[cfg(unix)]
+const SYSTEM_DIRS: &[&str] = &["/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin", "/usr/local/sbin", "/usr/bin"];
+#[cfg(windows)]
+const SYSTEM_DIRS: &[&str] = &[r"C:\Program Files\MySQL", r"C:\Program Files\PostgreSQL", r"C:\tools", r"C:\xampp\php", r"C:\php"];
+
 use serde::Serialize;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -11,13 +17,7 @@ use std::process::Command;
 
 fn search_dirs(base: &Path) -> Vec<PathBuf> {
     let mut dirs = vec![base.join("bin")];
-    for p in [
-        "/opt/homebrew/bin",
-        "/opt/homebrew/sbin",
-        "/usr/local/bin",
-        "/usr/local/sbin",
-        "/usr/bin",
-    ] {
+    for p in SYSTEM_DIRS {
         dirs.push(PathBuf::from(p));
     }
     if let Some(path) = std::env::var_os("PATH") {
@@ -30,7 +30,7 @@ fn search_dirs(base: &Path) -> Vec<PathBuf> {
 pub fn find(name: &str, base: &Path) -> Option<PathBuf> {
     search_dirs(base)
         .into_iter()
-        .map(|d| d.join(name))
+        .map(|d| d.join(crate::platform::name(name)))
         .find(|p| p.is_file())
 }
 
@@ -39,7 +39,7 @@ pub fn find_in_system(name: &str) -> Option<PathBuf> {
     search_dirs(Path::new(""))
         .into_iter()
         .filter(|d| d.is_absolute())
-        .map(|d| d.join(name))
+        .map(|d| d.join(crate::platform::name(name)))
         .find(|p| p.is_file())
 }
 
@@ -64,6 +64,7 @@ impl PhpInstall {
         let mut candidates = vec![dir.join("php")];
         if !self.managed {
             candidates.push(dir.join("../bin/php"));
+            candidates.push(crate::platform::bin(dir, "php"));
         }
         candidates.into_iter().find(|p| p.is_file())
     }
@@ -77,7 +78,7 @@ fn managed_installs(base: &Path) -> Vec<PhpInstall> {
     rd.flatten()
         .filter_map(|e| {
             let full = e.file_name().to_string_lossy().to_string();
-            let fpm = e.path().join("php-fpm");
+            let fpm = crate::platform::bin(&e.path(), "php-fpm");
             if !crate::php_manager::valid_version(&full) || !fpm.is_file() {
                 return None;
             }
@@ -92,12 +93,24 @@ fn managed_installs(base: &Path) -> Vec<PhpInstall> {
         .collect()
 }
 
+pub fn homebrew_prefixes() -> Vec<PathBuf> {
+    ["/opt/homebrew", "/usr/local"].into_iter().map(PathBuf::from).collect()
+}
+
 fn php_fpm_candidates() -> Vec<PathBuf> {
     let mut out = vec![];
-    for prefix in ["/opt/homebrew", "/usr/local"] {
-        out.push(Path::new(prefix).join("opt/php/sbin/php-fpm"));
-        out.push(Path::new(prefix).join("sbin/php-fpm"));
-        if let Ok(rd) = std::fs::read_dir(Path::new(prefix).join("opt")) {
+    #[cfg(windows)]
+    {
+        for p in homebrew_prefixes().into_iter().chain(SYSTEM_DIRS.iter().map(PathBuf::from)) {
+            out.push(p.join("php-fpm.exe"));
+            out.push(p.join("php").join("php-fpm.exe"));
+        }
+        return out;
+    }
+    for prefix in homebrew_prefixes() {
+        out.push(prefix.join("opt/php/sbin/php-fpm"));
+        out.push(prefix.join("sbin/php-fpm"));
+        if let Ok(rd) = std::fs::read_dir(prefix.join("opt")) {
             for e in rd.flatten() {
                 let n = e.file_name().to_string_lossy().to_string();
                 if n.starts_with("php@") {
