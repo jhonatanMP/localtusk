@@ -27,6 +27,7 @@ import PhpManager, { ProgressView, isBusy } from "./PhpManager";
 import RedisPanel from "./Redis";
 import WordPressPanel from "./WordPress";
 import { CodeMapTab } from "./CodeMap";
+import { UpdateBanner, UpdatePanel, useUpdate } from "./update";
 import { Copyable, Icon, IconName, Led, Logo, Skeleton, Spinner } from "./ui";
 import "./App.css";
 
@@ -54,6 +55,7 @@ export default function App() {
   const [blueprintsDir, setBlueprintsDir] = useState("");
   /** Criando um projeto novo a partir de um backup ou de um blueprint. */
   const [restoringNew, setRestoringNew] = useState<null | "backup" | "blueprint">(null);
+  const update = useUpdate();
 
   const loadPhps = useCallback(() => {
     api.listPhpVersions().then(setPhps);
@@ -215,6 +217,7 @@ export default function App() {
 
       <main className="main" ref={mainRef}>
         <div className="content">
+          <UpdateBanner update={update} onError={setError} />
           {missing.length > 0 && (
             <div className="banner warn">
               <Icon name="alert" />
@@ -260,6 +263,7 @@ export default function App() {
           )}
 
           {view === "php" ? (
+            <>
             <PhpManager
               phps={phps}
               mysqls={mysqls}
@@ -270,6 +274,8 @@ export default function App() {
               onChanged={loadPhps}
               onError={setError}
             />
+            <UpdatePanel update={update} onError={setError} />
+            </>
           ) : view === "blueprints" ? (
             <BlueprintsView
               blueprintsDir={blueprintsDir}

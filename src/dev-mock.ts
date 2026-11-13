@@ -144,6 +144,8 @@ export function installDevMock() {
         case "mysql_catalog": return mysqlCatalog;
         case "read_log": return logs;
         case "analyze_project": return later(codeMap);
+        case "check_update": return later({ current: "0.10.0", latest: "0.11.0", available: true, pageUrl: "https://github.com/jhonatanMP/localtusk/releases/tag/v0.11.0", downloadUrl: "https://github.com/jhonatanMP/localtusk/releases/download/v0.11.0/LocalTusk_0.11.0_aarch64.dmg" });
+        case "open_update_page": return later(null);
         case "ssl_status": return { caReady: sslTrusted || projects.some((x) => x.https), trusted: sslTrusted, caPath: "/Users/dev/LocalTusk/ssl/caddy/pki/authorities/local/root.crt", canTrust: true };
         case "trust_certificate": {
           // Com "?cancelar" na URL, simula a pessoa cancelando o pedido de senha do macOS.

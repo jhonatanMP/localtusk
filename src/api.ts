@@ -146,6 +146,17 @@ export interface CodeFile {
   dynamicIncludes: number;
 }
 
+/** Resultado da consulta por uma versão nova do LocalTusk. */
+export interface UpdateInfo {
+  current: string;
+  latest: string;
+  available: boolean;
+  /** Página do release, com as novidades. */
+  pageUrl: string;
+  /** Instalador direto (macOS); no Linux fica vazio e vale a página do release. */
+  downloadUrl: string | null;
+}
+
 /** Quem chama quem no projeto, lido dos arquivos PHP (aba Mapa). */
 export interface CodeMap {
   files: CodeFile[];
@@ -355,6 +366,8 @@ export const api = {
   openFolder: (id: string) => invoke<void>("open_folder", { id }),
   readLog: (id: string, file: string) => invoke<string>("read_log", { id, file }),
   analyzeProject: (id: string) => invoke<CodeMap>("analyze_project", { id }),
+  checkUpdate: () => invoke<UpdateInfo>("check_update"),
+  openUpdatePage: (url: string) => invoke<void>("open_update_page", { url }),
   appInfo: () => invoke<AppInfo>("app_info"),
   openDataDir: () => invoke<void>("open_data_dir"),
   phpCatalog: () => invoke<PhpRelease[]>("php_catalog"),

@@ -726,3 +726,11 @@ h1, h2, h3 { text-wrap: balance; }
 .react-flow { --xy-background-color: var(--bg); }
 .graph-canvas .react-flow__minimap { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 6px; width: 150px; height: 96px; }
 .graph-canvas .react-flow__controls-button { background: var(--surface-3); border-color: var(--line); fill: var(--text); }
+
+/* Aviso de nova versão */
+.banner.update { align-items: center; background: color-mix(in srgb, var(--php-purple) 16%, transparent); border-color: color-mix(in srgb, var(--php-purple) 55%, transparent); color: var(--text); }
+.banner.update > .icon { margin-top: 0; color: var(--accent); }
+.update-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.update-panel .row { display: flex; align-items: center; gap: 14px; }
+.update-panel .row.between { justify-content: space-between; align-items: flex-start; }
+.update-panel .update-check { margin-top: 12px; flex-wrap: wrap; }

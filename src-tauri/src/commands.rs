@@ -12,6 +12,7 @@ use crate::project::{self, DB_PASSWORD, DB_USER, Project, resolve_base};
 use crate::runtime::{self, Running};
 use crate::ssl;
 use crate::tools::{self, PhpInstall, ToolStatus};
+use crate::update::{self, UpdateInfo};
 use crate::wp::{self, WpOptions};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -515,6 +516,21 @@ pub async fn analyze_project(state: State<'_, AppState>, id: String) -> Result<c
     let p = state.find(&id)?;
     let root = runtime::app_dir(&state.base, &id);
     blocking(move || Ok(codemap::analyze(&root, &p.docroot))).await
+}
+
+/// Consulta se há uma versão nova do LocalTusk no GitHub.
+#[tauri::command]
+pub async fn check_update() -> Result<UpdateInfo, String> {
+    blocking(update::check).await
+}
+
+/// Abre a página (ou o instalador) de uma versão nova. Só aceita links do repositório do app.
+#[tauri::command]
+pub fn open_update_page(app: AppHandle, url: String) -> Result<(), String> {
+    if !update::is_allowed_url(&url) {
+        return Err("endereço não permitido".into());
+    }
+    app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
 }
 
 #[derive(Serialize)]
