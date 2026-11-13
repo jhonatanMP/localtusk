@@ -1006,7 +1006,11 @@ pub fn project_processes(base: &Path, id: &str) -> Vec<(i32, String)> {
     let mut found = parse_win_processes(&String::from_utf8_lossy(&out.stdout), &needle, std::process::id());
     // O Redis roda com cwd na pasta conf e a linha de comando só tem "valkey.conf"
     // (sem o caminho do projeto): ele é achado pela porta em que está escutando.
-    let redis_port = project::load(base).iter().find(|x| x.id == id).map(|x| x.redis_port).unwrap_or(0);
+    // A porta sai do valkey.conf já gravado do projeto (não depende do registro).
+    let redis_port = fs::read_to_string(project::project_dir(base, id).join("conf/valkey.conf"))
+        .ok()
+        .and_then(|conf| conf.lines().find_map(|l| l.strip_prefix("port ")?.trim().parse::<u16>().ok()))
+        .unwrap_or(0);
     if redis_port > 0 && !found.iter().any(|(_, c)| c.contains("redis-server") || c.contains("valkey-server")) {
         let script = format!(
             "$c = Get-NetTCPConnection -LocalPort {redis_port} -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1; if ($c) {{ $p = Get-CimInstance Win32_Process -Filter \"ProcessId = $($c.OwningProcess)\"; if ($p -and ($p.Name -eq 'redis-server.exe' -or $p.Name -eq 'valkey-server.exe')) {{ \"$($p.ProcessId)`t$($p.Name)`t$($p.CommandLine)\" }} }}"
