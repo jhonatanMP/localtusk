@@ -1711,9 +1711,11 @@ echo 'ext=' . (extension_loaded('pdo_pgsql') ? 'pdo_pgsql' : 'sem') . "\n";
         let sample = docroot_dir(&base, &p).join("sample.php");
         fs::write(&sample, SAMPLE_INDEX).unwrap();
         let body = http_get_path(http, "/sample.php");
-        assert!(body.contains("PostgreSQL 16") && body.contains("Valkey"), "{body}");
+        // No Windows o servidor é o Redis (redis-windows): a página mostra "Redis".
+        assert!(body.contains("PostgreSQL 16") && (body.contains("Valkey") || body.contains("Redis")), "{body}");
         let _ = fs::remove_file(&sample);
 
+println!("fase: backup");
         // --- Backup e restauração (pg_dump / psql) ---
         let archive = crate::backup::create(&base, &p, "", "backup-teste", &|_| {}).expect("backup");
         let manifest = crate::backup::read_manifest(&archive).unwrap();
@@ -1728,6 +1730,7 @@ echo 'ext=' . (extension_loaded('pdo_pgsql') ? 'pdo_pgsql' : 'sem') . "\n";
         let err = crate::backup::restore_into(&base, &mysql_twin, &archive, "x", &|_| {}).unwrap_err();
         assert!(err.contains("PostgreSQL") && err.contains("MySQL"), "{err}");
 
+println!("fase: terminal");
         // --- Terminal: atalhos já ligados ao banco e ao Redis ---
         let script = crate::wp::prepare_terminal(&base, &p).expect("terminal");
         let script_text = fs::read_to_string(&script).unwrap();
@@ -1765,6 +1768,7 @@ echo 'ext=' . (extension_loaded('pdo_pgsql') ? 'pdo_pgsql' : 'sem') . "\n";
         let ping = redis_cmd.arg("ping").output().unwrap();
         assert_eq!(String::from_utf8_lossy(&ping.stdout).trim(), "PONG");
 
+println!("fase: parar");
         // --- Parar: tudo para e as portas voltam ---
         let t = Instant::now();
         stop(&mut running);
@@ -1775,11 +1779,13 @@ echo 'ext=' . (extension_loaded('pdo_pgsql') ? 'pdo_pgsql' : 'sem') . "\n";
         let log = fs::read_to_string(project::project_dir(&base, "pgredis").join("logs/postgres.log")).unwrap_or_default();
         assert!(!log.contains("PANIC") && !log.contains("FATAL:  data directory"), "{log}");
 
+println!("fase: segunda subida");
         // --- Segunda subida: os dados persistem (banco e Redis) ---
         let mut running = start(&base, &p).expect("2º start falhou");
         let body = http_get(http);
         assert!(body.contains("notas=primeira") && body.contains("redis=valor1"), "dados não persistiram: {body}");
 
+println!("fase: órfãos");
         // --- Órfãos: um app morto à força deixa os serviços; o próximo start/abertura os encerra ---
         // Largamos os processos sem pará-los (como um app morto à força); as threads só recolhem
         // o processo depois que ele sair, para não virar zumbi deste teste.

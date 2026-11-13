@@ -58,6 +58,7 @@ jobs:
       # runner é admin. Compilamos como admin e rodamos o teste como usuário comum
       # (no uso real o app roda sem elevar, como qualquer app com UAC).
       - name: Projeto PostgreSQL + Redis de ponta a ponta
+        timeout-minutes: 18
         working-directory: src-tauri
         env:
           TEMP: C:\ltt\tmp
