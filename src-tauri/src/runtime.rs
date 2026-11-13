@@ -769,6 +769,10 @@ pub fn start(base: &Path, p: &Project) -> Result<Running, String> {
         } else {
             let mut c = Command::new(&mysqld);
             c.arg(format!("--defaults-file={}", q(&l.conf.join("my.cnf"))));
+            // No Windows o mysqld cria um processo filho e o pai sai, o que escaparia
+            // do nosso controle; --standalone mantém um processo só.
+            #[cfg(windows)]
+            c.arg("--standalone");
             running.services.push(Service {
                 name: "MySQL",
                 log: "mysql.log",
