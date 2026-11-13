@@ -140,6 +140,39 @@ fn catalog_win(base: &Path) -> Result<Vec<PhpRelease>, String> {
     Ok(parse_win_catalog(&body, &installed))
 }
 
+
+/// Baixa uma extensão do PECL para Windows (`php_redis.dll`, `php_igbinary.dll`) e a
+/// coloca no `ext/` do pacote. Melhor esforço: sem ela o PHP continua válido, só perde
+/// a extensão (o usuário ainda pode usar o Predis, que é PHP puro).
+#[cfg(windows)]
+fn win_install_pecl(tmp_dir: &Path, version: &str, package: &str) {
+    let minor = version.split('.').take(2).collect::<Vec<_>>().join(".");
+    let Some(compiler) = win_compiler(version) else { return };
+    let base = format!("https://windows.php.net/downloads/pecl/releases/{package}");
+    let Ok(listing) = download::get_string(&format!("{base}/")) else { return };
+    let re = regex::Regex::new(r"(\d+\.\d+\.\d+)/").unwrap();
+    let mut versions: Vec<String> = re.captures_iter(&listing).map(|c| c[1].to_string()).collect();
+    versions.sort_by(|a, b| version_key(b).cmp(&version_key(a)));
+    versions.dedup();
+    for v in versions {
+        let file = format!("php_{package}-{v}-{minor}-nts-{compiler}-x64.zip");
+        let Ok(dir_listing) = download::get_string(&format!("{base}/{v}/")) else { continue };
+        if !dir_listing.contains(&file) {
+            continue;
+        }
+        let archive = tmp_dir.join(format!(".pecl-{package}.zip"));
+        let out = tmp_dir.join(format!(".pecl-{package}"));
+        let done = download::download_to(&format!("{base}/{v}/{file}"), &archive, &mut |_, _| {}).is_ok()
+            && download::unpack_zip(&archive, &out).is_ok()
+            && fs::copy(out.join(format!("php_{package}.dll")), tmp_dir.join("ext").join(format!("php_{package}.dll"))).is_ok();
+        let _ = fs::remove_file(&archive);
+        let _ = fs::remove_dir_all(&out);
+        if done {
+            return;
+        }
+    }
+}
+
 #[cfg(windows)]
 fn install_win(base: &Path, version: &str, progress: &dyn Fn(InstallProgress)) -> Result<(), String> {
     let final_dir = install_dir(base, version);
@@ -180,6 +213,9 @@ fn install_win(base: &Path, version: &str, progress: &dyn Fn(InstallProgress)) -
         }
         // O resto do app procura `php-fpm(.exe)`: é o mesmo binário CGI com outro nome.
         fs::copy(&cgi, crate::platform::bin(&tmp_dir, "php-fpm")).map_err(|e| e.to_string())?;
+        // O PHP oficial não traz a extensão Redis: baixa do PECL (igbinary antes).
+        win_install_pecl(&tmp_dir, version, "igbinary");
+        win_install_pecl(&tmp_dir, version, "redis");
         emit("verify", 0, 0);
         let out = Command::new(&cgi).arg("-v").output().map_err(|e| format!("o binário baixado não executa: {e}"))?;
         let text = String::from_utf8_lossy(&out.stdout);

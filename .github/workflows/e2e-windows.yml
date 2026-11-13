@@ -1,0 +1,51 @@
+name: E2E Windows
+
+# Testes ponta a ponta no Windows: baixam PHP, Caddy, MySQL, PostgreSQL e Redis de verdade
+# e sobem um projeto. Rodam na branch `windows` (e manualmente) porque são pesados.
+on:
+  workflow_dispatch:
+  push:
+    branches: [windows]
+    paths: ["src-tauri/**", ".github/workflows/e2e-windows.yml"]
+
+concurrency:
+  group: e2e-windows
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: Pilha no Windows
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Instalar dependências do front-end
+        run: pnpm install --frozen-lockfile
+
+      # O Tauri exige a pasta dist/ para compilar o back-end.
+      - name: Front-end (tipos + build)
+        run: pnpm build
+
+      - name: Projeto MySQL de ponta a ponta (Caddy + PHP + MySQL)
+        working-directory: src-tauri
+        run: cargo test --locked --lib runtime::tests::start_serve_stop -- --ignored --nocapture
+
+      - name: Projeto PostgreSQL + Redis de ponta a ponta
+        working-directory: src-tauri
+        run: cargo test --locked --lib runtime::tests::postgres_redis_end_to_end -- --ignored --nocapture

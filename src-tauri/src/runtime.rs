@@ -128,7 +128,7 @@ if (getenv('REDIS_HOST')) {
         $redis = new Redis();
         $redis->connect(getenv('REDIS_HOST'), (int) getenv('REDIS_PORT'));
         $info = $redis->info();
-        $redisStatus = 'conectado (Valkey ' . ($info['valkey_version'] ?? $info['redis_version'] ?? '?') . ')';
+        $redisStatus = 'conectado (' . (isset($info['valkey_version']) ? 'Valkey ' . $info['valkey_version'] : 'Redis ' . ($info['redis_version'] ?? '?')) . ')';
     } catch (Throwable $e) {
         $redisStatus = 'erro: ' . $e->getMessage();
     }
@@ -1063,6 +1063,7 @@ pub fn app_dir(base: &Path, id: &str) -> PathBuf {
 
 #[cfg(test)]
 
+mod tests {
     #[cfg(windows)]
     #[test]
     fn filtra_processos_do_windows() {
@@ -1077,7 +1078,7 @@ pub fn app_dir(base: &Path, id: &str) -> PathBuf {
         let pids: Vec<i32> = found.iter().map(|f| f.0).collect();
         assert_eq!(pids, [1234, 3333]);
     }
-mod tests {
+
     /// Só serviços nossos, do projeto certo, são tratados como órfãos.
     #[test]
     fn reconhece_servicos_orfaos_do_projeto() {
@@ -1165,10 +1166,27 @@ mod tests {
             fs::create_dir_all(to.parent().unwrap()).unwrap();
             #[cfg(unix)]
             std::os::unix::fs::symlink(&from, &to).unwrap();
+            // Sem privilégio de link simbólico (Windows sem modo desenvolvedor), copia.
             #[cfg(windows)]
-            std::os::windows::fs::symlink_dir(&from, &to).unwrap();
+            if std::os::windows::fs::symlink_dir(&from, &to).is_err() {
+                copy_dir(&from, &to);
+            }
         }
         base
+    }
+
+    /// Copia uma pasta inteira (fallback dos links simbólicos nos testes do Windows).
+    #[cfg(windows)]
+    fn copy_dir(from: &Path, to: &Path) {
+        fs::create_dir_all(to).unwrap();
+        for e in fs::read_dir(from).unwrap().flatten() {
+            let dest = to.join(e.file_name());
+            if e.path().is_dir() {
+                copy_dir(&e.path(), &dest);
+            } else {
+                fs::copy(e.path(), dest).unwrap();
+            }
+        }
     }
 
     /// Teste ponta a ponta: baixa (uma vez) Caddy, MySQL e PHP.
@@ -1581,7 +1599,8 @@ mod tests {
         }
         if valkey_manager::pick(&base).is_none() {
             let t = Instant::now();
-            valkey_manager::install(&base, valkey_manager::VERSION, &show).expect("valkey");
+            let vk_version = valkey_manager::catalog(&base).expect("catálogo do Redis")[0].version.clone();
+            valkey_manager::install(&base, &vk_version, &show).expect("valkey");
             println!("Valkey compilado em {:?}", t.elapsed());
         }
         assert!(valkey_manager::pick(&base).unwrap().cli().is_some());
@@ -1634,8 +1653,11 @@ echo 'ext=' . (extension_loaded('pdo_pgsql') ? 'pdo_pgsql' : 'sem') . "\n";
         let t = Instant::now();
         let mut running = start(&base, &p).expect("start falhou");
         println!("start (com download do PHP common) em {:?}", t.elapsed());
-        assert!(crate::php_manager::pg_fpm(&base, &php.full_version).is_some(), "o PHP common deveria ter sido baixado");
-        assert!(crate::php_manager::pg_cli(&base, &php.full_version).is_some());
+        #[cfg(not(windows))]
+        {
+            assert!(crate::php_manager::pg_fpm(&base, &php.full_version).is_some(), "o PHP common deveria ter sido baixado");
+            assert!(crate::php_manager::pg_cli(&base, &php.full_version).is_some());
+        }
 
         let body = http_get(http);
         println!("{}", body.lines().rev().take(6).collect::<Vec<_>>().join(" | "));
@@ -1678,9 +1700,21 @@ echo 'ext=' . (extension_loaded('pdo_pgsql') ? 'pdo_pgsql' : 'sem') . "\n";
         // --- Terminal: atalhos já ligados ao banco e ao Redis ---
         let script = crate::wp::prepare_terminal(&base, &p).expect("terminal");
         let script_text = fs::read_to_string(&script).unwrap();
-        assert!(script_text.contains("export PGPORT=") && script_text.contains("export REDIS_PORT="), "{script_text}");
+        if cfg!(windows) {
+            assert!(script_text.contains("PGPORT=") && script_text.contains("REDIS_PORT="), "{script_text}");
+        } else {
+            assert!(script_text.contains("export PGPORT=") && script_text.contains("export REDIS_PORT="), "{script_text}");
+        }
         let shims = project::project_dir(&base, &p.id).join("conf").join("shims");
-        let psql_out = Command::new(shims.join("psql"))
+        // No Windows os atalhos são `.bat`: só rodam pelo cmd.
+        let mut psql_cmd = if cfg!(windows) {
+            let mut c = Command::new("cmd");
+            c.arg("/C").arg(shims.join("psql.bat"));
+            c
+        } else {
+            Command::new(shims.join("psql"))
+        };
+        let psql_out = psql_cmd
             .env("PGHOST", "127.0.0.1")
             .env("PGPORT", db.to_string())
             .env("PGUSER", "root")
@@ -1690,7 +1724,14 @@ echo 'ext=' . (extension_loaded('pdo_pgsql') ? 'pdo_pgsql' : 'sem') . "\n";
             .output()
             .unwrap();
         assert_eq!(String::from_utf8_lossy(&psql_out.stdout).trim(), "1", "{}", String::from_utf8_lossy(&psql_out.stderr));
-        let ping = Command::new(shims.join("redis-cli")).arg("ping").output().unwrap();
+        let mut redis_cmd = if cfg!(windows) {
+            let mut c = Command::new("cmd");
+            c.arg("/C").arg(shims.join("redis-cli.bat"));
+            c
+        } else {
+            Command::new(shims.join("redis-cli"))
+        };
+        let ping = redis_cmd.arg("ping").output().unwrap();
         assert_eq!(String::from_utf8_lossy(&ping.stdout).trim(), "PONG");
 
         // --- Parar: tudo para e as portas voltam ---
@@ -1717,9 +1758,10 @@ echo 'ext=' . (extension_loaded('pdo_pgsql') ? 'pdo_pgsql' : 'sem') . "\n";
             });
         }
         let found = project_processes(&base, &p.id);
-        let names: Vec<String> = found.iter().map(|(_, c)| c.split_whitespace().next().unwrap_or("").rsplit('/').next().unwrap_or("").to_string()).collect();
+        let names: Vec<String> = found.iter().map(|(_, c)| c.split_whitespace().next().unwrap_or("").rsplit(['/', '\\']).next().unwrap_or("").to_string()).collect();
         println!("órfãos reconhecidos: {names:?}");
-        for expected in ["postgres", "valkey-server", "caddy"] {
+        let expected: &[&str] = if cfg!(windows) { &["postgres.exe", "redis-server.exe", "caddy.exe"] } else { &["postgres", "valkey-server", "caddy"] };
+        for expected in expected {
             assert!(names.iter().any(|n| n == expected), "não reconheceu {expected}: {names:?}");
         }
         assert!(php_fpm_seen(&found), "não reconheceu o php-fpm");
@@ -1749,7 +1791,7 @@ echo 'ext=' . (extension_loaded('pdo_pgsql') ? 'pdo_pgsql' : 'sem') . "\n";
     }
 
     fn php_fpm_seen(found: &[(i32, String)]) -> bool {
-        found.iter().any(|(_, c)| c.starts_with("php-fpm:"))
+        found.iter().any(|(_, c)| c.starts_with("php-fpm:") || c.contains("php-fpm.exe") || c.contains("php-cgi.exe"))
     }
 
     /// Instala o WordPress de verdade (WP-CLI + PHP CLI + MySQL), confere o site e os atalhos

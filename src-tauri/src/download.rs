@@ -4,7 +4,9 @@ use serde::Serialize;
 use sha2::{Digest, Sha256, Sha512};
 use std::fs::File;
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(windows)]
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 /// Evento de progresso enviado à interface (`install-progress`).
