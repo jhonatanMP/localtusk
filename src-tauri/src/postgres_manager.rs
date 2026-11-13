@@ -374,7 +374,7 @@ mod tests {
         for v in ["15.20.0", "16.15.0", "16.16.0"] {
             let d = install_dir(&base, v).join("bin");
             fs::create_dir_all(&d).unwrap();
-            fs::write(d.join("postgres"), "").unwrap();
+            fs::write(crate::platform::bin(&d, "postgres"), "").unwrap();
         }
         // Pasta que não é versão é ignorada.
         fs::create_dir_all(pg_root(&base).join(".tmp-17.0.0")).unwrap();

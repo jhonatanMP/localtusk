@@ -349,14 +349,21 @@ export default function PhpManager(props: {
               progress={props.progress}
               onInstall={(v) => run(() => api.installValkey(v))}
             />
-            {vkCatalog && (
-              <p className="hint">
-                O Valkey é o sucessor livre do Redis e fala o mesmo protocolo (<code>redis-cli</code>, phpredis, Predis).
-                O app baixa o código-fonte e o compila na sua máquina (cerca de 15 segundos); isso exige as
-                ferramentas de linha de comando do Xcode (<code>xcode-select --install</code>). O Redis escuta só em
-                127.0.0.1.
-              </p>
-            )}
+            {vkCatalog &&
+              (navigator.userAgent.includes("Windows") ? (
+                <p className="hint">
+                  No Windows o app usa o Redis do projeto comunitário <strong>redis-windows</strong> (build do Redis
+                  oficial), porque o Valkey não tem versão para Windows. Ele fala o mesmo protocolo (<code>redis-cli</code>,
+                  phpredis, Predis) e escuta só em 127.0.0.1.
+                </p>
+              ) : (
+                <p className="hint">
+                  O Valkey é o sucessor livre do Redis e fala o mesmo protocolo (<code>redis-cli</code>, phpredis, Predis).
+                  O app baixa o código-fonte e o compila na sua máquina (cerca de 15 segundos); isso pode exigir as
+                  ferramentas de compilação do sistema (no macOS, <code>xcode-select --install</code>; no Linux,{" "}
+                  <code>build-essential</code>). O Redis escuta só em 127.0.0.1.
+                </p>
+              ))}
           </section>
         </div>
       )}
