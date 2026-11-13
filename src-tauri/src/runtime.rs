@@ -369,6 +369,9 @@ fn render_valkey_conf(p: &Project, data: &str) -> String {
     // Barra normal no caminho: dentro das aspas o Redis trata "\\" como escape e
     // corromperia um caminho do Windows ("C:\\ltt\\..." viraria "C:ltt...").
     let data = data.replace('\\', "/");
+    // No Windows não há desligamento gracioso (o processo morre por taskkill /F),
+    // então a persistência vai pelo AOF; nos outros sistemas o SIGTERM salva o RDB.
+    let appendonly = if cfg!(windows) { "yes" } else { "no" };
     format!(
         "bind 127.0.0.1\n\
          port {port}\n\
@@ -380,8 +383,9 @@ fn render_valkey_conf(p: &Project, data: &str) -> String {
          save 900 1\n\
          save 300 10\n\
          save 60 10000\n\
-         appendonly no\n",
-        port = p.redis_port
+         appendonly {appendonly}\n",
+        port = p.redis_port,
+        appendonly = appendonly
     )
 }
 
