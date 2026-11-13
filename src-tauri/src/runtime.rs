@@ -185,6 +185,12 @@ fn windows_ext_lines(php_dir: &Path) -> String {
             out.push_str(&format!("extension={name}\n"));
         }
     }
+    // O Redis do PECL depende do igbinary: ele precisa vir antes na lista.
+    for name in ["php_igbinary", "php_redis"] {
+        if ext_dir.join(format!("{name}.dll")).is_file() {
+            out.push_str(&format!("extension={name}\n"));
+        }
+    }
     if ext_dir.join("php_opcache.dll").is_file() {
         out.push_str("zend_extension=php_opcache\n");
     }
