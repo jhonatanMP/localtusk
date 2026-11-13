@@ -54,9 +54,24 @@ jobs:
           TMP: C:\ltt\tmp
         run: cargo test --locked --lib runtime::tests::start_serve_stop -- --ignored --nocapture
 
+      # O PostgreSQL se recusa a rodar com privilégios de administrador, e o usuário do
+      # runner é admin. Compilamos como admin e rodamos o teste como usuário comum
+      # (no uso real o app roda sem elevar, como qualquer app com UAC).
       - name: Projeto PostgreSQL + Redis de ponta a ponta
         working-directory: src-tauri
         env:
           TEMP: C:\ltt\tmp
           TMP: C:\ltt\tmp
-        run: cargo test --locked --lib runtime::tests::postgres_redis_end_to_end -- --ignored --nocapture
+        run: |
+          cargo test --locked --lib --no-run
+          $exe = Get-ChildItem target\debug\deps\localtusk_lib-*.exe | Sort-Object LastWriteTime | Select-Object -Last 1
+          Write-Host "binário de teste: $($exe.FullName)"
+          net user lttest "Ltt#pass123" /add | Out-Null
+          icacls target /grant "lttest:(OI)(CI)M" /T /Q | Out-Null
+          icacls C:\ltt /grant "lttest:(OI)(CI)M" /T /Q | Out-Null
+          $sec = ConvertTo-SecureString "Ltt#pass123" -AsPlainText -Force
+          $cred = [System.Management.Automation.PSCredential]::new("lttest", $sec)
+          $inner = "`$env:TEMP='C:\ltt\tmp'; `$env:TMP='C:\ltt\tmp'; & '$($exe.FullName)' runtime::tests::postgres_redis_end_to_end --ignored --nocapture; exit `$LASTEXITCODE"
+          $proc = Start-Process powershell -Credential $cred -WorkingDirectory $PWD -ArgumentList @('-NoProfile', '-Command', $inner) -Wait -PassThru -NoNewWindow -RedirectStandardOutput C:\ltt\pg-out.txt -RedirectStandardError C:\ltt\pg-err.txt
+          Get-Content C:\ltt\pg-out.txt, C:\ltt\pg-err.txt -ErrorAction SilentlyContinue
+          exit $proc.ExitCode
