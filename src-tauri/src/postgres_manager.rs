@@ -137,7 +137,9 @@ pub fn catalog(base: &Path) -> Result<Vec<PostgresRelease>, String> {
 fn keep(rel: &Path) -> bool {
     let comps: Vec<String> = rel.components().map(|c| c.as_os_str().to_string_lossy().to_string()).collect();
     match comps.first().map(String::as_str) {
-        Some("bin") => comps.len() == 2 && BINARIES.contains(&comps[1].trim_end_matches(".exe")),
+        // No Windows as DLLs das bibliotecas (libpq, OpenSSL, ICU) ficam em bin/,
+        // ao lado dos .exe, e o carregador só procura ali: elas precisam ficar.
+        Some("bin") => comps.len() == 2 && (BINARIES.contains(&comps[1].trim_end_matches(".exe")) || comps[1].ends_with(".dll")),
         Some("lib") => {
             comps.len() == 2 && {
                 let n = comps[1].as_str();
