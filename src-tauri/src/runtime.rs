@@ -155,18 +155,6 @@ fn q(path: &Path) -> String {
     path.display().to_string().replace('\\', "/")
 }
 
-/// Caminho em formato POSIX para binários MSYS2 (o Redis do Windows):
-/// "C:/Users/..." vira "/c/Users/...". Nas outras plataformas é o caminho comum.
-#[cfg(windows)]
-fn msys_path(p: &Path) -> String {
-    let s = q(p);
-    let b = s.as_bytes();
-    if b.len() > 2 && b[1] == b':' && b[2] == b'/' {
-        format!("/{}/{}", (b[0] as char).to_ascii_lowercase(), &s[3..])
-    } else {
-        s
-    }
-}
 
 #[cfg(not(windows))]
 fn msys_path(p: &Path) -> String {
@@ -804,9 +792,17 @@ pub fn start(base: &Path, p: &Project) -> Result<Running, String> {
 
         if let Some(v) = &valkey {
             let mut c = Command::new(&v.server);
-            // O redis-server do Windows é um build MSYS2: ele só entende o caminho do
-            // config em formato POSIX ("/c/Users/..."), não "C:\\..." nem "C:/...".
-            c.arg(msys_path(&l.conf.join("valkey.conf")));
+            #[cfg(windows)]
+            {
+                // O redis-server do Windows é um build MSYS2 mínimo: ele não entende
+                // "C:\\...", "C:/..." nem "/c/..." como caminho absoluto do config
+                // (trata tudo como relativo ao cwd). Rodamos com cwd na pasta conf e
+                // passamos só o nome do arquivo.
+                c.current_dir(&l.conf);
+                c.arg("valkey.conf");
+            }
+            #[cfg(not(windows))]
+            c.arg(q(&l.conf.join("valkey.conf")));
             running.services.push(Service {
                 name: "Redis",
                 log: "valkey.log",
