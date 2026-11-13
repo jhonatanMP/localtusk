@@ -1009,7 +1009,7 @@ pub fn project_processes(base: &Path, id: &str) -> Vec<(i32, String)> {
     let redis_port = project::load(base).iter().find(|x| x.id == id).map(|x| x.redis_port).unwrap_or(0);
     if redis_port > 0 && !found.iter().any(|(_, c)| c.contains("redis-server") || c.contains("valkey-server")) {
         let script = format!(
-            "$c = Get-NetTCPConnection -LocalPort {redis_port} -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1;              if ($c) {{ $p = Get-CimInstance Win32_Process -Filter "ProcessId = $($c.OwningProcess)";              if ($p -and ($p.Name -eq 'redis-server.exe' -or $p.Name -eq 'valkey-server.exe')) {{ "$($p.ProcessId)`t$($p.Name)`t$($p.CommandLine)" }} }}"
+            "$c = Get-NetTCPConnection -LocalPort {redis_port} -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1; if ($c) {{ $p = Get-CimInstance Win32_Process -Filter \"ProcessId = $($c.OwningProcess)\"; if ($p -and ($p.Name -eq 'redis-server.exe' -or $p.Name -eq 'valkey-server.exe')) {{ \"$($p.ProcessId)`t$($p.Name)`t$($p.CommandLine)\" }} }}"
         );
         if let Ok(out) = Command::new("powershell").args(["-NoProfile", "-NonInteractive", "-Command", &script]).output() {
             for line in String::from_utf8_lossy(&out.stdout).lines() {
