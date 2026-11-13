@@ -75,3 +75,7 @@ jobs:
           $proc = Start-Process powershell -Credential $cred -WorkingDirectory $PWD -ArgumentList @('-NoProfile', '-Command', $inner) -Wait -PassThru -NoNewWindow -RedirectStandardOutput C:\ltt\pg-out.txt -RedirectStandardError C:\ltt\pg-err.txt
           Get-Content C:\ltt\pg-out.txt, C:\ltt\pg-err.txt -ErrorAction SilentlyContinue
           exit $proc.ExitCode
+
+      - name: Logs dos projetos (em caso de falha)
+        if: failure()
+        run: Get-ChildItem C:\ltt\tmp -Recurse -Filter *.log | ForEach-Object { Write-Host "===== $($_.FullName)"; Get-Content $_.FullName -Tail 30 }

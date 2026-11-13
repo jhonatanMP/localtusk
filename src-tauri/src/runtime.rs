@@ -358,6 +358,9 @@ fn write_configs(l: &Layout, p: &Project, fpm_port: u16, x: &Extras, php_dir: &P
 /// instantâneo em disco de vez em quando e mantém a linha de comando original no `ps`
 /// (assim o app reconhece e encerra um Valkey órfão pela pasta do projeto).
 fn render_valkey_conf(p: &Project, data: &str) -> String {
+    // Barra normal no caminho: dentro das aspas o Redis trata "\\" como escape e
+    // corromperia um caminho do Windows ("C:\\ltt\\..." viraria "C:ltt...").
+    let data = data.replace('\\', "/");
     format!(
         "bind 127.0.0.1\n\
          port {port}\n\
