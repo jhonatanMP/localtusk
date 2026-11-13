@@ -42,10 +42,21 @@ jobs:
       - name: Front-end (tipos + build)
         run: pnpm build
 
+      # O TEMP do runner é um nome curto 8.3 (C:\Users\RUNNER~1\...), que o php-cgi
+      # trunca ao abrir o script. Os testes usam um TEMP limpo, sem "~".
+      - name: Preparar TEMP limpo
+        run: New-Item -ItemType Directory -Force C:\ltt\tmp | Out-Null
+
       - name: Projeto MySQL de ponta a ponta (Caddy + PHP + MySQL)
         working-directory: src-tauri
+        env:
+          TEMP: C:\ltt\tmp
+          TMP: C:\ltt\tmp
         run: cargo test --locked --lib runtime::tests::start_serve_stop -- --ignored --nocapture
 
       - name: Projeto PostgreSQL + Redis de ponta a ponta
         working-directory: src-tauri
+        env:
+          TEMP: C:\ltt\tmp
+          TMP: C:\ltt\tmp
         run: cargo test --locked --lib runtime::tests::postgres_redis_end_to_end -- --ignored --nocapture

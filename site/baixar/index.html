@@ -120,14 +120,15 @@
           </article>
 
           <article class="card os-card" data-os="windows">
-            <h3><svg class="ico"><use href="../assets/img/icons.svg#i-monitor"/></svg> Windows <span class="status soon">Em breve</span> <span class="status ok you" hidden>Seu sistema</span></h3>
-            <p class="muted">O código compila e passa nos testes automáticos, mas o app ainda não baixa o MySQL nem o PostgreSQL no Windows.</p>
+            <h3><svg class="ico"><use href="../assets/img/icons.svg#i-monitor"/></svg> Windows <span class="status soon">Beta</span> <span class="status ok you" hidden>Seu sistema</span></h3>
+            <p class="muted">A pilha completa (PHP, MySQL, PostgreSQL, Redis, WordPress, HTTPS e rede) passa nos testes automáticos no Windows, mas ainda tem poucas horas de uso real. Reporte problemas no GitHub.</p>
             <ul>
-              <li>Instalação dos bancos em desenvolvimento</li>
-              <li>Acompanhe pelo GitHub</li>
+              <li>Windows 10 ou 11, x64 (ARM ainda não)</li>
+              <li>PHP, bancos e ferramentas baixados pelo app</li>
+              <li>No Windows o Redis é o build comunitário do projeto redis-windows</li>
             </ul>
             <div class="dl-actions">
-              <a class="btn btn-ghost" href="https://github.com/jhonatanMP/localtusk/issues" rel="noopener">Acompanhar no GitHub <svg class="ico"><use href="../assets/img/icons.svg#i-external"/></svg></a>
+              <a class="btn btn-primary" data-asset="windows-x64-installer" href="https://github.com/jhonatanMP/localtusk/releases" rel="noopener"><svg class="ico"><use href="../assets/img/icons.svg#i-download"/></svg> Instalador (.exe) <small data-size></small></a>
             </div>
           </article>
         </div>
@@ -143,7 +144,7 @@
     <section class="section" style="padding-top:0">
       <div class="narrow prose">
         <h2 id="instalar">Instalar</h2>
-        <p><b>macOS:</b> abra o <code>.dmg</code> e arraste o LocalTusk para a pasta Aplicativos. <b>Linux:</b> com o <code>.AppImage</code>, rode <code>chmod +x LocalTusk_*.AppImage</code> e abra o arquivo; com o <code>.deb</code>, <code>sudo apt install ./LocalTusk_*.deb</code>; com o <code>.rpm</code>, <code>sudo dnf install ./LocalTusk-*.rpm</code>.</p>
+        <p><b>Windows:</b> rode o <code>LocalTusk_*_x64-setup.exe</code> e siga o instalador. <b>macOS:</b> abra o <code>.dmg</code> e arraste o LocalTusk para a pasta Aplicativos. <b>Linux:</b> com o <code>.AppImage</code>, rode <code>chmod +x LocalTusk_*.AppImage</code> e abra o arquivo; com o <code>.deb</code>, <code>sudo apt install ./LocalTusk_*.deb</code>; com o <code>.rpm</code>, <code>sudo dnf install ./LocalTusk-*.rpm</code>.</p>
 
         <div class="note"><svg class="ico"><use href="../assets/img/icons.svg#i-info"/></svg><div><b>Primeira abertura no macOS.</b> O app ainda não é assinado nem notarizado pela Apple, então o macOS pode bloquear a primeira abertura. Clique com o botão direito no app, escolha <b>Abrir</b> e confirme. Se preferir pelo terminal: <code>xattr -cr /Applications/LocalTusk.app</code>.</div></div>
 
