@@ -306,6 +306,25 @@ fn install_win(base: &Path, version: &str, progress: &dyn Fn(InstallProgress)) -
         emit("extract", 0, 0, None);
         fs::create_dir_all(&tmp_dir).map_err(|e| e.to_string())?;
         download::unpack_zip(&archive, &tmp_dir)?;
+        // O zip traz uma pasta raiz (Redis-<versão>-Windows-x64-msys2/): sobe o conteúdo dela.
+        if !crate::platform::bin(&tmp_dir, "redis-server").is_file() {
+            let mut inner = None;
+            for e in fs::read_dir(&tmp_dir).map_err(|e| e.to_string())? {
+                let path = e.map_err(|e| e.to_string())?.path();
+                if path.is_dir() && crate::platform::bin(&path, "redis-server").is_file() {
+                    inner = Some(path);
+                    break;
+                }
+            }
+            if let Some(inner) = inner {
+                for e in fs::read_dir(&inner).map_err(|e| e.to_string())? {
+                    let from = e.map_err(|e| e.to_string())?.path();
+                    let to = tmp_dir.join(from.file_name().unwrap());
+                    fs::rename(&from, &to).map_err(|e| e.to_string())?;
+                }
+                let _ = fs::remove_dir_all(&inner);
+            }
+        }
         let server = crate::platform::bin(&tmp_dir, "redis-server");
         if !server.is_file() {
             return Err("o pacote do Redis não contém o redis-server.exe".into());
