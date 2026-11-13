@@ -786,7 +786,9 @@ pub fn start(base: &Path, p: &Project) -> Result<Running, String> {
 
         if let Some(v) = &valkey {
             let mut c = Command::new(&v.server);
-            c.arg(l.conf.join("valkey.conf"));
+            // Barras normais: o redis-server do Windows é um build MSYS2, que não
+            // reconhece "C:\\..." como caminho absoluto e o trata como relativo.
+            c.arg(q(&l.conf.join("valkey.conf")));
             running.services.push(Service {
                 name: "Redis",
                 log: "valkey.log",
