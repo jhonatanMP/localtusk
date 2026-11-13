@@ -27,7 +27,7 @@ Cada projeto roda com processos nativos isolados: **Caddy** (web) + **PHP-FPM** 
 - [x] **Acessível na rede**: ligue para abrir o site em outros aparelhos da mesma rede (IP e nome `.local`); só o site é exposto, banco, Adminer Neo e Mailpit continuam locais. Para HTTPS sem aviso em outro aparelho, instale nele o certificado raiz (o app mostra o arquivo)
 - [ ] Domínios `.test` sem porta (opcional, exige configuração única com senha de administrador)
 - [ ] Git integrado
-- [x] Download do MySQL e do PostgreSQL no macOS e no Linux (no Windows ainda não)
+- [x] Download do MySQL e do PostgreSQL no macOS, no Linux e no Windows
 - [x] Backup e restauração de projetos (arquivos + banco) em `~/LocalTusk/backups`
 - [x] **Blueprints**: salve um projeto (arquivos, banco e versões de PHP/MySQL) como modelo em `~/LocalTusk/blueprints` e crie novos projetos já prontos a partir dele; dá para compartilhar o blueprint como arquivo e importar o de outra pessoa
 - [x] Aba **API**: inspetor que mostra cada requisição recebida pelo projeto (cabeçalhos, corpo, formulário/arquivos, resposta, tempo; copiar como cURL e reenviar) e um cliente de API (métodos, cabeçalhos, corpo JSON/form/texto, redirecionamentos, histórico) com **coleção** de requisições salvas por projeto (`collection.json`), exportável e importável (também dá para salvar direto do inspetor), com layout que se adapta à largura da janela
@@ -36,7 +36,7 @@ Cada projeto roda com processos nativos isolados: **Caddy** (web) + **PHP-FPM** 
 - [x] CI no GitHub Actions (`.github/workflows/ci.yml`): compila e testa em macOS, Linux e Windows
 - [x] **Linux (beta)**: PHP, MySQL, PostgreSQL, Redis, WordPress, HTTPS e rede passam nos testes ponta a ponta no Ubuntu 24.04 ARM64; o x86_64 e a interface gráfica ainda têm pouco uso real
 - [x] Instaladores publicados pelo GitHub Actions (`.github/workflows/release.yml`): `.dmg` (Apple Silicon e Intel), `.AppImage`, `.deb` e `.rpm` (x86_64 e ARM64)
-- [ ] Windows (o código compila, mas o app ainda não baixa o MySQL nem o PostgreSQL lá)
+- [x] Windows (beta): pilha completa validada em testes automáticos; o Redis usa o build comunitário do projeto redis-windows
 
 ## Pré-requisitos
 

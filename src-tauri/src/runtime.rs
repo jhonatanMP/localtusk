@@ -1195,6 +1195,18 @@ mod tests {
 
     /// Teste ponta a ponta: baixa (uma vez) Caddy, MySQL e PHP.
     /// Rode com: `cargo test -- --ignored --nocapture`
+    /// Espera a porta ficar livre (o fechamento do soquete pode demorar um instante,
+    /// sobretudo no Windows, onde o processo morre via taskkill).
+    fn assert_port_free(port: u16, what: &str) {
+        for _ in 0..100 {
+            if project::port_is_free(port) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        panic!("{what} ainda no ar");
+    }
+
     #[test]
     #[ignore]
     fn start_serve_stop() {
@@ -1220,8 +1232,8 @@ mod tests {
         assert!(body.contains("200 OK"), "resposta inesperada");
         assert!(body.contains("conectado"), "PHP não conectou ao MySQL");
         stop(&mut running);
-        assert!(project::port_is_free(http), "Caddy ainda no ar");
-        assert!(project::port_is_free(db), "MySQL ainda no ar");
+        assert_port_free(http, "Caddy");
+        assert_port_free(db, "MySQL");
         let _ = fs::remove_dir_all(&base);
     }
 
