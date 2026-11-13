@@ -155,6 +155,24 @@ fn q(path: &Path) -> String {
     path.display().to_string().replace('\\', "/")
 }
 
+/// Caminho em formato POSIX para binários MSYS2 (o Redis do Windows):
+/// "C:/Users/..." vira "/c/Users/...". Nas outras plataformas é o caminho comum.
+#[cfg(windows)]
+fn msys_path(p: &Path) -> String {
+    let s = q(p);
+    let b = s.as_bytes();
+    if b.len() > 2 && b[1] == b':' && b[2] == b'/' {
+        format!("/{}/{}", (b[0] as char).to_ascii_lowercase(), &s[3..])
+    } else {
+        s
+    }
+}
+
+#[cfg(not(windows))]
+fn msys_path(p: &Path) -> String {
+    q(p)
+}
+
 struct MailCfg {
     bin: PathBuf,
     web: u16,
@@ -786,9 +804,9 @@ pub fn start(base: &Path, p: &Project) -> Result<Running, String> {
 
         if let Some(v) = &valkey {
             let mut c = Command::new(&v.server);
-            // Barras normais: o redis-server do Windows é um build MSYS2, que não
-            // reconhece "C:\\..." como caminho absoluto e o trata como relativo.
-            c.arg(q(&l.conf.join("valkey.conf")));
+            // O redis-server do Windows é um build MSYS2: ele só entende o caminho do
+            // config em formato POSIX ("/c/Users/..."), não "C:\\..." nem "C:/...".
+            c.arg(msys_path(&l.conf.join("valkey.conf")));
             running.services.push(Service {
                 name: "Redis",
                 log: "valkey.log",
