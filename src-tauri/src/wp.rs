@@ -447,7 +447,15 @@ pub fn open_terminal(base: &Path, p: &Project) -> Result<(), String> {
             let script_path = prepare_terminal(base, p)?;
             open_linux_terminal(&script_path)
         }
-        _ => Err("O terminal integrado só está disponível no macOS e no Linux por enquanto.".into()),
+        "windows" => {
+            let bat = prepare_terminal(base, p)?;
+            Command::new("cmd")
+                .args(["/C", "start", "", "cmd", "/K", "call", &bat.display().to_string()])
+                .spawn()
+                .map_err(|e| format!("não foi possível abrir o terminal: {e}"))?;
+            Ok(())
+        }
+        _ => Err("O terminal integrado não está disponível neste sistema por enquanto.".into()),
     }
 }
 
@@ -615,6 +623,97 @@ pub(crate) fn prepare_terminal(base: &Path, p: &Project) -> Result<PathBuf, Stri
     )
     .map_err(|e| e.to_string())?;
 
+
+/// Aspas para linhas de comando do `cmd` (batch).
+#[cfg(windows)]
+fn winq(s: &str) -> String {
+    format!("\"{}\"", s.replace('"', ""))
+}
+
+#[cfg(windows)]
+fn write_bat(path: &Path, lines: &[String]) -> Result<(), String> {
+    fs::write(path, lines.join("\r\n") + "\r\n").map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// Gera os atalhos `.bat` e o `terminal.bat` do Windows; devolve o caminho do script.
+#[cfg(windows)]
+fn write_win_terminal(base: &Path, p: &Project, php: &Path, conf: &Path, shims: &Path) -> Result<PathBuf, String> {
+    let bat = |name: &str, lines: Vec<String>| write_bat(&shims.join(format!("{name}.bat")), &lines);
+    let extra = php_args(base, p).iter().map(|a| winq(a)).collect::<Vec<_>>().join(" ");
+    bat("php", vec!["@echo off".into(), format!("{} {extra} %*", winq(&php.display().to_string()))])?;
+    let phar = extras::dir(base, "wpcli").join("wp-cli.phar");
+    bat(
+        "wp",
+        vec![
+            "@echo off".into(),
+            format!("if not exist {} (echo O WP-CLI nao esta instalado. Instale-o em PHP e ferramentas no LocalTusk. & exit /b 1)", winq(&phar.display().to_string())),
+            format!("set \"WP_CLI_PHP={}\"", shims.join("php.bat").display()),
+            "set \"WP_CLI_DISABLE_AUTO_CHECK_UPDATE=1\"".into(),
+            format!("{} {extra} {} %*", winq(&php.display().to_string()), winq(&phar.display().to_string())),
+        ],
+    )?;
+    if project::is_postgres(p) {
+        if let Some(pg) = postgres_manager::pick(base, &p.db_version) {
+            for tool in ["psql", "pg_dump", "pg_dumpall", "pg_restore", "createdb", "pg_isready"] {
+                if let Some(real) = pg.tool(tool) {
+                    bat(tool, vec!["@echo off".into(), format!("{} %*", winq(&real.display().to_string()))])?;
+                }
+            }
+        }
+    }
+    if project::redis_on(p) {
+        if let Some(cli) = valkey_manager::pick(base).and_then(|v| v.cli()) {
+            let lines = vec!["@echo off".into(), format!("{} -h 127.0.0.1 -p {} %*", winq(&cli.display().to_string()), p.redis_port)];
+            bat("redis-cli", lines.clone())?;
+            bat("valkey-cli", lines)?;
+        }
+    }
+    if !project::is_postgres(p) {
+        if let Some(bin_dir) = mysql_manager::pick(base, &p.db_version).and_then(|i| i.mysqld.parent().map(Path::to_path_buf)) {
+            for tool in ["mysql", "mysqldump", "mysqladmin"] {
+                let real = crate::platform::bin(&bin_dir, tool);
+                if real.is_file() {
+                    let database = if tool == "mysql" { format!(" --database={}", p.db_name) } else { String::new() };
+                    bat(
+                        tool,
+                        vec![
+                            "@echo off".into(),
+                            format!("set \"MYSQL_PWD={}\"", DB_PASSWORD),
+                            format!("{} --host=127.0.0.1 --port={} --user={}{} %*", winq(&real.display().to_string()), p.db_port, DB_USER, database),
+                        ],
+                    )?;
+                }
+            }
+        }
+    }
+    let clean = |t: &str| t.replace(['&', '|', '<', '>', '^', '%'], " ");
+    let mut out: Vec<String> = vec!["@echo off".into(), format!("set \"LOCALTUSK_PROJECT={}\"", p.id), format!("set \"PATH={};%PATH%\"", shims.display())];
+    for (k, v) in project_env(p) {
+        out.push(format!("set \"{k}={v}\""));
+    }
+    if project::is_postgres(p) {
+        out.push("set \"PGHOST=127.0.0.1\"".into());
+        out.push(format!("set \"PGPORT={}\"", p.db_port));
+        out.push(format!("set \"PGUSER={}\"", DB_USER));
+        out.push(format!("set \"PGPASSWORD={}\"", DB_PASSWORD));
+        out.push(format!("set \"PGDATABASE={}\"", p.db_name));
+    } else {
+        out.push("set \"MYSQL_HOST=127.0.0.1\"".into());
+        out.push(format!("set \"MYSQL_TCP_PORT={}\"", p.db_port));
+    }
+    out.push(format!("cd /d {}", winq(&runtime::docroot_dir(base, p).display().to_string())));
+    out.push("cls".into());
+    out.push(format!("echo LocalTusk - {}", clean(&p.name)));
+    out.push(format!("echo {}", clean(&terminal_banner(p))));
+    out.push("echo.".into());
+    write_bat(&conf.join("terminal.bat"), &out)?;
+    Ok(conf.join("terminal.bat"))
+}
+
+    #[cfg(windows)]
+    {
+        return write_win_terminal(base, p, &php, &conf, &shims);
+    }
     let mut script = String::from("#!/bin/zsh\n");
     script.push_str(&format!("export LOCALTUSK_PROJECT={}\n", sh_quote(&p.id)));
     script.push_str(&format!("export LOCALTUSK_SHIMS={}\n", sh_quote(&shims.display().to_string())));

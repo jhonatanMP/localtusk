@@ -163,7 +163,13 @@ pub fn lan_hostname() -> Option<String> {
             let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
             (out.status.success() && !name.is_empty()).then(|| format!("{name}.local"))
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(target_os = "windows")]
+        {
+            // O Windows 10/11 responde por `<nome>.local` via mDNS.
+            let name = std::env::var("COMPUTERNAME").unwrap_or_default();
+            (!name.is_empty()).then(|| format!("{name}.local"))
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         {
             None
         }
