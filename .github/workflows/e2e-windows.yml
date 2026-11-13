@@ -96,4 +96,8 @@ jobs:
 
       - name: Logs dos projetos (em caso de falha)
         if: failure()
-        run: Get-ChildItem C:\ltt\tmp -Recurse -Filter *.log | ForEach-Object { Write-Host "===== $($_.FullName)"; Get-Content $_.FullName -Tail 30 }
+        run: |
+          Write-Host "===== saída do teste (pg-out.txt)"
+          Get-Content C:\ltt\pg-out.txt -Tail 80 -ErrorAction SilentlyContinue
+          Get-Content C:\ltt\pg-err.txt -Tail 20 -ErrorAction SilentlyContinue
+          Get-ChildItem C:\ltt\tmp -Recurse -Filter *.log | ForEach-Object { Write-Host "===== $($_.FullName)"; Get-Content $_.FullName -Tail 30 }

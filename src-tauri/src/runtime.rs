@@ -1704,10 +1704,13 @@ echo 'ext=' . (extension_loaded('pdo_pgsql') ? 'pdo_pgsql' : 'sem') . "\n";
         }
 
         // Grava dados nos dois e confere pelo PHP.
+        println!("fase: gravar dados");
         let body = http_request(http, "GET", "/?add=primeira&set=valor1", "", "");
         assert!(body.contains("notas=primeira") && body.contains("redis=valor1"), "{body}");
+        println!("fase: dados gravados");
 
         // A página de exemplo padrão também entende PostgreSQL e Redis.
+        println!("fase: página de exemplo");
         let sample = docroot_dir(&base, &p).join("sample.php");
         fs::write(&sample, SAMPLE_INDEX).unwrap();
         let body = http_get_path(http, "/sample.php");
@@ -1718,10 +1721,12 @@ echo 'ext=' . (extension_loaded('pdo_pgsql') ? 'pdo_pgsql' : 'sem') . "\n";
 println!("fase: backup");
         // --- Backup e restauração (pg_dump / psql) ---
         let archive = crate::backup::create(&base, &p, "", "backup-teste", &|_| {}).expect("backup");
+        println!("fase: backup criado");
         let manifest = crate::backup::read_manifest(&archive).unwrap();
         assert_eq!(manifest.db_engine, "postgres");
         psql(&pg.tool("psql").unwrap(), db, "pgredis", "DROP TABLE notas").expect("drop");
         crate::backup::restore_into(&base, &p, &archive, "restore-teste", &|_| {}).expect("restore");
+        println!("fase: backup restaurado");
         // restore_into apaga a pasta app/ e traz a do backup de volta (com o index.php do teste).
         let body = http_get(http);
         assert!(body.contains("notas=primeira"), "dados não voltaram do backup: {body}");
