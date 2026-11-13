@@ -1,5 +1,5 @@
 {
- "generated": "2026-11-12",
+ "generated": "2026-11-13",
  "versions": [
   {
    "version": "18.7.0",
@@ -20,6 +20,10 @@
     "linux-x86_64": {
      "bytes": 40530262,
      "sha256": "53ca01952cb581145e4fb16b6b3b675da345a82879f350707b9f65863a0642f4"
+    },
+    "win-x86_64": {
+     "bytes": 49777647,
+     "sha256": "6e054adb854dbed1f78f9933a1c65737d85a47d2446ce0e9b5f055fb3794fe5c"
     }
    }
   },
@@ -42,6 +46,10 @@
     "linux-x86_64": {
      "bytes": 40118562,
      "sha256": "af316b6e42266ec0a153bdc9194e0b1b5f12c9ce4f0b13d9a96dfca77d9aaecc"
+    },
+    "win-x86_64": {
+     "bytes": 49402184,
+     "sha256": "11c843939c303aceb70ad79d4c3c27da4b7dec2ffb2d5022ec8edd501517b21b"
     }
    }
   },
@@ -64,6 +72,10 @@
     "linux-x86_64": {
      "bytes": 39431025,
      "sha256": "f668fbc685cdcb71d6a82f57035bed7d97b059e2d8a1d3adf317ec36c5e861d2"
+    },
+    "win-x86_64": {
+     "bytes": 48702594,
+     "sha256": "4557b8251bb967c1c09eab57439fb2f1179d35c70debfc692fe637bb08d2f20c"
     }
    }
   },
@@ -86,6 +98,10 @@
     "linux-x86_64": {
      "bytes": 38821617,
      "sha256": "2eec5422941fc12339d86c18542753a6b3ca6822149b18d036a05717d5f58e26"
+    },
+    "win-x86_64": {
+     "bytes": 84342197,
+     "sha256": "a5f192b45d51d4ff59f33ca1549e6a7e0b8c2727c5e87f01163755c572459c19"
     }
    }
   },
@@ -108,6 +124,10 @@
     "linux-x86_64": {
      "bytes": 30082078,
      "sha256": "1eec1ed02ee719ba18ebcfbcb536eea76fa543c0f21b1e5cc4c9b089bd7e44bb"
+    },
+    "win-x86_64": {
+     "bytes": 86395917,
+     "sha256": "5545e016cc4d88d56595434bd54c1b3492c3cd12231ac0caa50cdf7548481859"
     }
    }
   }

@@ -150,7 +150,9 @@ fn write(path: &Path, content: String) -> Result<(), String> {
 }
 
 fn q(path: &Path) -> String {
-    path.display().to_string()
+    // Barras normais: no Windows os arquivos de configuração (Caddyfile, my.cnf, php.ini)
+    // tratam "\\" como escape, e as APIs aceitam "/" sem problema.
+    path.display().to_string().replace('\\', "/")
 }
 
 struct MailCfg {
@@ -166,7 +168,62 @@ struct Extras {
     mail: Option<MailCfg>,
 }
 
-fn write_configs(l: &Layout, p: &Project, fpm_port: u16, x: &Extras) -> Result<(), String> {
+
+/// Linhas de extensões para o `php.ini` do Windows: o PHP oficial de lá não traz nada
+/// ativado, então ligamos as extensões que o pacote tem (MySQL, PostgreSQL, curl...).
+#[cfg(windows)]
+fn windows_ext_lines(php_dir: &Path) -> String {
+    let ext_dir = php_dir.join("ext");
+    let mut out = format!("cgi.force_redirect=0\nextension_dir=\"{}\"\n", q(&ext_dir));
+    for name in [
+        "php_curl", "php_fileinfo", "php_mbstring", "php_openssl", "php_mysqli", "php_pdo_mysql",
+        "php_pgsql", "php_pdo_pgsql", "php_gd", "php_intl", "php_exif", "php_zip", "php_sodium", "php_bz2",
+    ] {
+        if ext_dir.join(format!("{name}.dll")).is_file() {
+            out.push_str(&format!("extension={name}\n"));
+        }
+    }
+    if ext_dir.join("php_opcache.dll").is_file() {
+        out.push_str("zend_extension=php_opcache\n");
+    }
+    out
+}
+
+#[cfg(not(windows))]
+fn windows_ext_lines(_php_dir: &Path) -> String {
+    String::new()
+}
+
+/// Variáveis de ambiente do PHP do projeto (banco, Redis, e-mail). No macOS/Linux vão
+/// para o `php-fpm.conf`; no Windows, para o ambiente do processo `php-cgi`.
+fn project_env(p: &Project, x: &Extras) -> Vec<(String, String)> {
+    let postgres = project::is_postgres(p);
+    let mut env: Vec<(String, String)> = vec![
+        ("DB_HOST".into(), "127.0.0.1".into()),
+        ("DB_PORT".into(), p.db_port.to_string()),
+        ("DB_NAME".into(), p.db_name.clone()),
+        ("DB_USER".into(), DB_USER.into()),
+        ("DB_PASSWORD".into(), DB_PASSWORD.into()),
+        ("DB_ENGINE".into(), project::engine_of(p).to_string()),
+        ("DB_CONNECTION".into(), if postgres { "pgsql".into() } else { "mysql".into() }),
+    ];
+    if project::redis_on(p) {
+        env.push(("REDIS_HOST".into(), "127.0.0.1".into()));
+        env.push(("REDIS_PORT".into(), p.redis_port.to_string()));
+        env.push(("REDIS_URL".into(), format!("redis://127.0.0.1:{}", p.redis_port)));
+    }
+    if let Some(m) = &x.mail {
+        for k in ["MAIL_HOST", "SMTP_HOST"] {
+            env.push((k.into(), "127.0.0.1".into()));
+        }
+        for k in ["MAIL_PORT", "SMTP_PORT"] {
+            env.push((k.into(), m.smtp.to_string()));
+        }
+    }
+    env
+}
+
+fn write_configs(l: &Layout, p: &Project, fpm_port: u16, x: &Extras, php_dir: &Path) -> Result<(), String> {
     let socket = l.mysql_socket(p);
     let postgres = project::is_postgres(p);
 
@@ -241,7 +298,7 @@ fn write_configs(l: &Layout, p: &Project, fpm_port: u16, x: &Extras) -> Result<(
     write(
         &l.conf.join("php.ini"),
         format!(
-            "{cacert}{mail_ini}\
+            "{cacert}{mail_ini}{win_ext}\
              auto_prepend_file={capture}\n\
              memory_limit=512M\n\
              upload_max_filesize=64M\n\
@@ -259,41 +316,11 @@ fn write_configs(l: &Layout, p: &Project, fpm_port: u16, x: &Extras) -> Result<(
             port = if postgres { 3306 } else { p.db_port },
             cacert = cacert,
             mail_ini = mail_ini,
+            win_ext = windows_ext_lines(php_dir),
             capture = q(&capture)
         ),
     )?;
-    let mut env_lines = format!(
-        "env[DB_HOST] = 127.0.0.1\n\
-         env[DB_PORT] = {}\n\
-         env[DB_NAME] = {}\n\
-         env[DB_USER] = {}\n\
-         env[DB_PASSWORD] = {}\n\
-         env[DB_ENGINE] = {}\n\
-         env[DB_CONNECTION] = {}\n",
-        p.db_port,
-        p.db_name,
-        DB_USER,
-        DB_PASSWORD,
-        project::engine_of(p),
-        if postgres { "pgsql" } else { "mysql" },
-    );
-    if project::redis_on(p) {
-        env_lines.push_str(&format!(
-            "env[REDIS_HOST] = 127.0.0.1\n\
-             env[REDIS_PORT] = {port}\n\
-             env[REDIS_URL] = redis://127.0.0.1:{port}\n",
-            port = p.redis_port
-        ));
-    }
-    if let Some(m) = &x.mail {
-        env_lines.push_str(&format!(
-            "env[MAIL_HOST] = 127.0.0.1\n\
-             env[MAIL_PORT] = {smtp}\n\
-             env[SMTP_HOST] = 127.0.0.1\n\
-             env[SMTP_PORT] = {smtp}\n",
-            smtp = m.smtp
-        ));
-    }
+    let env_lines: String = project_env(p, x).iter().map(|(k, v)| format!("env[{k}] = {v}\n")).collect();
     write(
         &l.conf.join("php-fpm.conf"),
         format!(
@@ -440,6 +467,12 @@ fn log_file(l: &Layout, name: &str) -> Result<File, String> {
 fn spawn(l: &Layout, mut cmd: Command, log: &str) -> Result<Child, String> {
     let out = log_file(l, log)?;
     let err = out.try_clone().map_err(|e| e.to_string())?;
+    // Sem isto cada serviço abriria uma janela de console no Windows.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
     cmd.stdin(Stdio::null())
         .stdout(Stdio::from(out))
         .stderr(Stdio::from(err))
@@ -674,7 +707,7 @@ pub fn start(base: &Path, p: &Project) -> Result<Running, String> {
         }),
     };
 
-    write_configs(&l, p, fpm_port, &x)?;
+    write_configs(&l, p, fpm_port, &x, php_fpm.parent().unwrap_or(Path::new("")))?;
     if let Some(pg) = &pg {
         if !pg_initialized(&l) {
             let initdb = pg.tool("initdb").ok_or("o PostgreSQL instalado não inclui o initdb")?;
@@ -756,11 +789,25 @@ pub fn start(base: &Path, p: &Project) -> Result<Running, String> {
         }
 
         let mut c = Command::new(&php_fpm);
-        c.arg("-F")
-            .arg("-y")
-            .arg(l.conf.join("php-fpm.conf"))
-            .arg("-c")
-            .arg(l.conf.join("php.ini"));
+        // Windows: é o php-cgi.exe ouvindo FastCGI na porta; ambiente pelo processo.
+        #[cfg(windows)]
+        {
+            c.arg("-b")
+                .arg(format!("127.0.0.1:{fpm_port}"))
+                .arg("-c")
+                .arg(l.conf.join("php.ini"));
+            for (k, v) in project_env(p, &x) {
+                c.env(k, v);
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            c.arg("-F")
+                .arg("-y")
+                .arg(l.conf.join("php-fpm.conf"))
+                .arg("-c")
+                .arg(l.conf.join("php.ini"));
+        }
         running.services.push(Service {
             name: "PHP-FPM",
             log: "php-fpm.log",
@@ -882,19 +929,65 @@ pub fn kill_processes(found: &[(i32, String)]) -> usize {
     found.len()
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 pub fn reap_orphans(_base: &Path, _id: &str) -> usize {
     0
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 pub fn project_processes(_base: &Path, _id: &str) -> Vec<(i32, String)> {
     vec![]
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 pub fn kill_processes(_found: &[(i32, String)]) -> usize {
     0
+}
+
+/// Filtra a saída do PowerShell (`pid<TAB>nome<TAB>linha de comando`): só os serviços
+/// que o app sobe e cuja linha de comando cita a pasta do projeto.
+#[cfg(windows)]
+fn parse_win_processes(listing: &str, needle: &str, me: u32) -> Vec<(i32, String)> {
+    const NAMES: &[&str] = &[
+        "mysqld.exe", "postgres.exe", "valkey-server.exe", "redis-server.exe", "caddy.exe",
+        "mailpit.exe", "php-cgi.exe", "php-fpm.exe",
+    ];
+    listing
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.splitn(3, '\t');
+            let pid: u32 = parts.next()?.trim().parse().ok()?;
+            let name = parts.next()?.trim();
+            let cmd = parts.next()?.trim();
+            (pid != me && NAMES.contains(&name) && cmd.replace('\\', "/").to_lowercase().contains(&needle.to_lowercase()))
+                .then(|| (pid as i32, cmd.to_string()))
+        })
+        .collect()
+}
+
+#[cfg(windows)]
+pub fn project_processes(base: &Path, id: &str) -> Vec<(i32, String)> {
+    let needle = format!("{}/", project::project_dir(base, id).display().to_string().replace('\\', "/"));
+    let script = format!(
+        "$n = '{needle}'; Get-CimInstance Win32_Process | Where-Object {{ $_.CommandLine -and $_.CommandLine.Replace('\\','/').ToLower().Contains($n.ToLower()) }} | ForEach-Object {{ \"$($_.ProcessId)`t$($_.Name)`t$($_.CommandLine)\" }}"
+    );
+    let Ok(out) = Command::new("powershell").args(["-NoProfile", "-NonInteractive", "-Command", &script]).output() else {
+        return vec![];
+    };
+    parse_win_processes(&String::from_utf8_lossy(&out.stdout), &needle, std::process::id())
+}
+
+#[cfg(windows)]
+pub fn kill_processes(found: &[(i32, String)]) -> usize {
+    for (pid, _) in found {
+        let _ = Command::new("taskkill").args(["/PID", &pid.to_string(), "/T", "/F"]).output();
+    }
+    found.len()
+}
+
+#[cfg(windows)]
+pub fn reap_orphans(base: &Path, id: &str) -> usize {
+    kill_processes(&project_processes(base, id))
 }
 
 #[cfg(unix)]
@@ -904,8 +997,14 @@ fn terminate(child: &Child, fast: bool) {
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 fn terminate(_child: &Child, _fast: bool) {}
+
+#[cfg(windows)]
+fn terminate(child: &Child, _fast: bool) {
+    // Encerra o processo e os filhos dele (o MySQL recupera sozinho no próximo início).
+    let _ = Command::new("taskkill").args(["/PID", &child.id().to_string(), "/T", "/F"]).output();
+}
 
 /// Para os serviços em ordem inversa (Caddy, PHP-FPM, Redis, banco), de forma graciosa.
 pub fn stop(running: &mut Running) {
@@ -963,6 +1062,21 @@ pub fn app_dir(base: &Path, id: &str) -> PathBuf {
 }
 
 #[cfg(test)]
+
+    #[cfg(windows)]
+    #[test]
+    fn filtra_processos_do_windows() {
+        let needle = "C:/Users/dev/LocalTusk/projects/loja/";
+        let listing = concat!(
+            "1234\tmysqld.exe\t\"C:\\x\\mysqld.exe\" --defaults-file=C:/Users/dev/LocalTusk/projects/loja/conf/my.cnf\n",
+            "2222\tchrome.exe\tchrome C:/Users/dev/LocalTusk/projects/loja/\n",
+            "3333\tcaddy.exe\tcaddy run --config C:\\Users\\dev\\LocalTusk\\projects\\loja\\conf\\Caddyfile\n",
+            "4444\tmysqld.exe\tmysqld --defaults-file=C:/outro/projeto/conf/my.cnf\n",
+        );
+        let found = parse_win_processes(listing, needle, 9999);
+        let pids: Vec<i32> = found.iter().map(|f| f.0).collect();
+        assert_eq!(pids, [1234, 3333]);
+    }
 mod tests {
     /// Só serviços nossos, do projeto certo, são tratados como órfãos.
     #[test]

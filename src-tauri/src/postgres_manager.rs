@@ -68,6 +68,7 @@ fn arch() -> Option<(&'static str, &'static str)> {
         ("macos", "x86_64") => Some(("x86_64", "x86_64-apple-darwin")),
         ("linux", "aarch64") => Some(("linux-aarch64", "aarch64-unknown-linux-gnu")),
         ("linux", "x86_64") => Some(("linux-x86_64", "x86_64-unknown-linux-gnu")),
+        ("windows", "x86_64") => Some(("win-x86_64", "x86_64-pc-windows-msvc")),
         _ => None,
     }
 }
@@ -110,7 +111,7 @@ pub struct PostgresRelease {
 
 /// Versões disponíveis para download nesta máquina, da mais nova para a mais antiga.
 pub fn catalog(base: &Path) -> Result<Vec<PostgresRelease>, String> {
-    let (arch, _) = arch().ok_or("O download do PostgreSQL só está disponível para macOS e Linux por enquanto.")?;
+    let (arch, _) = arch().ok_or("O download do PostgreSQL só está disponível para macOS, Linux e Windows (x64) por enquanto.")?;
     let installed = managed_versions(base);
     let mut versions: Vec<(String, u64)> = manifest()
         .into_iter()
@@ -136,11 +137,11 @@ pub fn catalog(base: &Path) -> Result<Vec<PostgresRelease>, String> {
 fn keep(rel: &Path) -> bool {
     let comps: Vec<String> = rel.components().map(|c| c.as_os_str().to_string_lossy().to_string()).collect();
     match comps.first().map(String::as_str) {
-        Some("bin") => comps.len() == 2 && BINARIES.contains(&comps[1].as_str()),
+        Some("bin") => comps.len() == 2 && BINARIES.contains(&comps[1].trim_end_matches(".exe")),
         Some("lib") => {
             comps.len() == 2 && {
                 let n = comps[1].as_str();
-                (n.ends_with(".dylib") || n.contains(".so")) && !n.starts_with("libLLVM") && !n.contains("llvmjit") && !n.contains("plpython")
+                (n.ends_with(".dylib") || n.contains(".so") || n.ends_with(".dll")) && !n.starts_with("libLLVM") && !n.contains("llvmjit") && !n.contains("plpython")
             }
         }
         Some("share") => comps.get(1).map(String::as_str) != Some("doc"),
@@ -153,9 +154,9 @@ pub fn install(base: &Path, version: &str, progress: &dyn Fn(InstallProgress)) -
     if !valid_version(version) {
         return Err("versão inválida".into());
     }
-    let (arch, triple) = arch().ok_or("O download do PostgreSQL só está disponível para macOS e Linux por enquanto.")?;
+    let (arch, triple) = arch().ok_or("O download do PostgreSQL só está disponível para macOS, Linux e Windows (x64) por enquanto.")?;
     let final_dir = install_dir(base, version);
-    if final_dir.join("bin").join("postgres").is_file() {
+    if crate::platform::bin(&final_dir.join("bin"), "postgres").is_file() {
         return Ok(());
     }
 
@@ -224,7 +225,7 @@ pub fn install(base: &Path, version: &str, progress: &dyn Fn(InstallProgress)) -
         }
 
         // O servidor precisa rodar e reportar a versão pedida.
-        let postgres = tmp_dir.join("bin").join("postgres");
+        let postgres = crate::platform::bin(&tmp_dir.join("bin"), "postgres");
         if !postgres.is_file() {
             return Err("o pacote do PostgreSQL não contém o postgres".into());
         }
@@ -280,7 +281,7 @@ impl PostgresInstall {
 
     /// Caminho de um cliente (`psql`, `pg_dump`…), se existir.
     pub fn tool(&self, name: &str) -> Option<PathBuf> {
-        let p = self.bin_dir().join(name);
+        let p = crate::platform::bin(&self.bin_dir(), name);
         p.is_file().then_some(p)
     }
 }
@@ -298,7 +299,7 @@ pub fn installs(base: &Path) -> Vec<PostgresInstall> {
         .flatten()
         .filter_map(|e| {
             let version = e.file_name().to_string_lossy().to_string();
-            let postgres = e.path().join("bin").join("postgres");
+            let postgres = crate::platform::bin(&e.path().join("bin"), "postgres");
             (valid_version(&version) && postgres.is_file()).then(|| PostgresInstall {
                 major: major_of(&version),
                 full_version: version,
@@ -360,6 +361,8 @@ mod tests {
         assert!(k("lib/libpq.5.dylib") && k("lib/libicudata.79.dylib") && k("lib/pg_trgm.dylib"));
         assert!(!k("lib/libLLVM.dylib") && !k("lib/llvmjit.dylib") && !k("lib/plpython3.dylib"));
         assert!(!k("lib/libpq.a") && !k("lib/bitcode/x.bc") && !k("lib/pgxs/Makefile"));
+        assert!(k("bin/postgres.exe") && k("bin/pg_dump.exe") && !k("bin/pgbench.exe"));
+        assert!(k("lib/libpq.dll") && !k("lib/libLLVM.dll"));
         assert!(k("share/postgres.bki") && k("share/timezone/UTC") && !k("share/doc/x.html"));
         assert!(!k("include/libpq-fe.h") && !k("COPYRIGHT"));
     }

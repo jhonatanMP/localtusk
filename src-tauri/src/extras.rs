@@ -25,8 +25,8 @@ pub fn dir(base: &Path, id: &str) -> PathBuf {
 /// Arquivo cuja existência indica que a ferramenta está instalada.
 fn marker(base: &Path, id: &str) -> PathBuf {
     match id {
-        "mailpit" => dir(base, id).join("mailpit"),
-        "caddy" => dir(base, id).join("caddy"),
+        "mailpit" => crate::platform::bin(&dir(base, id), "mailpit"),
+        "caddy" => crate::platform::bin(&dir(base, id), "caddy"),
         "wpcli" => dir(base, id).join("wp-cli.phar"),
         _ => dir(base, id).join("index.php"),
     }
@@ -287,6 +287,7 @@ fn mailpit_asset() -> Option<&'static str> {
         ("macos", "x86_64") => Some("mailpit-darwin-amd64.tar.gz"),
         ("linux", "aarch64") => Some("mailpit-linux-arm64.tar.gz"),
         ("linux", "x86_64") => Some("mailpit-linux-amd64.tar.gz"),
+        ("windows", "x86_64") => Some("mailpit-windows-amd64.zip"),
         _ => None,
     }
 }
@@ -305,11 +306,8 @@ fn install_mailpit(tmp: &Path, archive: &Path, emit: Emit) -> Result<String, Str
         .map_err(|e| format!("Mailpit: {e}"))?;
 
     emit("extract", 0, 0);
-    let file = File::open(archive).map_err(|e| e.to_string())?;
-    tar::Archive::new(flate2::read::GzDecoder::new(file))
-        .unpack(tmp)
-        .map_err(|e| format!("falha ao extrair: {e}"))?;
-    let bin = tmp.join("mailpit");
+    unpack_tool(archive, tmp, asset)?;
+    let bin = crate::platform::bin(tmp, "mailpit");
     if !bin.is_file() {
         return Err("o pacote do Mailpit não contém o executável".into());
     }
@@ -340,7 +338,25 @@ fn caddy_platform() -> Option<&'static str> {
         ("macos", "x86_64") => Some("mac_amd64"),
         ("linux", "aarch64") => Some("linux_arm64"),
         ("linux", "x86_64") => Some("linux_amd64"),
+        ("windows", "x86_64") => Some("windows_amd64"),
         _ => None,
+    }
+}
+
+/// Extrai o pacote de uma ferramenta: `.zip` no Windows, `.tar.gz` nos outros sistemas.
+fn unpack_tool(archive: &Path, tmp: &Path, asset: &str) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let _ = asset;
+        return crate::download::unpack_zip(archive, tmp);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = asset;
+        let file = File::open(archive).map_err(|e| e.to_string())?;
+        tar::Archive::new(flate2::read::GzDecoder::new(file))
+            .unpack(tmp)
+            .map_err(|e| format!("falha ao extrair: {e}"))
     }
 }
 
@@ -354,7 +370,8 @@ fn install_caddy(tmp: &Path, archive: &Path, emit: Emit) -> Result<String, Strin
         .ok_or("não foi possível descobrir a versão atual do Caddy")?;
     let version = tag.trim_start_matches('v').to_string();
 
-    let file_name = format!("caddy_{version}_{platform}.tar.gz");
+    let ext = if cfg!(windows) { "zip" } else { "tar.gz" };
+    let file_name = format!("caddy_{version}_{platform}.{ext}");
     let base_url = format!("https://github.com/caddyserver/caddy/releases/download/{tag}");
     download::download_to(&format!("{base_url}/{file_name}"), archive, &mut |d, t| emit("download", d, t))
         .map_err(|e| format!("Caddy: {e}"))?;
@@ -373,11 +390,8 @@ fn install_caddy(tmp: &Path, archive: &Path, emit: Emit) -> Result<String, Strin
     }
 
     emit("extract", 0, 0);
-    let file = File::open(archive).map_err(|e| e.to_string())?;
-    tar::Archive::new(flate2::read::GzDecoder::new(file))
-        .unpack(tmp)
-        .map_err(|e| format!("falha ao extrair: {e}"))?;
-    let bin = tmp.join("caddy");
+    unpack_tool(archive, tmp, &file_name)?;
+    let bin = crate::platform::bin(tmp, "caddy");
     if !bin.is_file() {
         return Err("o pacote do Caddy não contém o executável".into());
     }

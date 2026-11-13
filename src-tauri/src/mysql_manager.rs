@@ -50,11 +50,12 @@ fn arch() -> Option<&'static str> {
         ("macos", "x86_64") => Some("x86_64"),
         ("linux", "aarch64") => Some("linux-aarch64"),
         ("linux", "x86_64") => Some("linux-x86_64"),
+        ("windows", "x86_64") => Some("win-x86_64"),
         _ => None,
     }
 }
 
-const UNSUPPORTED: &str = "O download do MySQL só está disponível para macOS e Linux por enquanto.";
+const UNSUPPORTED: &str = "O download do MySQL só está disponível para macOS, Linux e Windows (x64) por enquanto.";
 
 #[derive(Deserialize)]
 struct Manifest {
@@ -140,9 +141,9 @@ pub fn catalog(base: &Path) -> Result<Vec<MysqlRelease>, String> {
 
 /// Caminhos que valem a pena guardar (o tarball completo tem centenas de MB de testes e extras).
 fn keep(rel: &Path) -> bool {
-    let s = rel.to_string_lossy();
+    let s = rel.to_string_lossy().replace('\\', "/");
     // `bin/*.dylib`: o mysqld carrega libprotobuf-lite via @loader_path (na própria pasta bin/).
-    let bin_lib = s.starts_with("bin/") && !s[4..].contains('/') && (s.ends_with(".dylib") || s.contains(".so"));
+    let bin_lib = s.starts_with("bin/") && !s[4..].contains('/') && (s.ends_with(".dylib") || s.contains(".so") || s.ends_with(".dll"));
     // No Linux o pacote completo traz bibliotecas estáticas (`.a`), a versão de depuração dos
     // plugins e dicionários do MeCab, que ocupam centenas de MB e o app não usa.
     let lib = s.starts_with("lib/")
@@ -153,8 +154,9 @@ fn keep(rel: &Path) -> bool {
         || lib
         || s.starts_with("share/")
         || matches!(
-            s.as_ref(),
+            s.as_str(),
             "bin/mysqld" | "bin/mysql" | "bin/mysqldump" | "bin/mysqladmin"
+                | "bin/mysqld.exe" | "bin/mysql.exe" | "bin/mysqldump.exe" | "bin/mysqladmin.exe"
         )
 }
 
@@ -165,7 +167,7 @@ pub fn install(base: &Path, version: &str, progress: &dyn Fn(InstallProgress)) -
     }
     let arch = arch().ok_or(UNSUPPORTED)?;
     let final_dir = install_dir(base, version);
-    if final_dir.join("bin").join("mysqld").is_file() {
+    if crate::platform::bin(&final_dir.join("bin"), "mysqld").is_file() {
         return Ok(());
     }
 
@@ -213,6 +215,11 @@ pub fn install(base: &Path, version: &str, progress: &dyn Fn(InstallProgress)) -
 
         emit("extract", 0, 0);
         fs::create_dir_all(&tmp_dir).map_err(|e| e.to_string())?;
+        #[cfg(windows)]
+        {
+            download::unpack_zip_filtered(&archive, &tmp_dir, &keep)?;
+            return finish_install(&tmp_dir, &final_dir, version, &emit);
+        }
         let file = File::open(&archive).map_err(|e| e.to_string())?;
         let mut tar = tar::Archive::new(open_tarball(file, urls.first().map(String::as_str).unwrap_or(""))?);
         for entry in tar.entries().map_err(|e| e.to_string())? {
@@ -236,11 +243,23 @@ pub fn install(base: &Path, version: &str, progress: &dyn Fn(InstallProgress)) -
                 .map_err(|e| format!("falha ao extrair {}: {e}", rel.display()))?;
         }
 
+        finish_install(&tmp_dir, &final_dir, version, &emit)
+    })();
+
+    let _ = fs::remove_file(&archive);
+    if result.is_err() {
+        let _ = fs::remove_dir_all(&tmp_dir);
+    }
+    result
+}
+
+/// Verifica o `mysqld` extraído e publica a pasta temporária como instalação.
+fn finish_install(tmp_dir: &Path, final_dir: &Path, version: &str, emit: &dyn Fn(&str, u64, u64)) -> Result<(), String> {
         // Verificação: o binário precisa rodar e reportar a versão pedida.
         emit("verify", 0, 0);
         #[cfg(target_os = "linux")]
-        link_libaio(&tmp_dir)?;
-        let mysqld = tmp_dir.join("bin").join("mysqld");
+        link_libaio(tmp_dir)?;
+        let mysqld = crate::platform::bin(&tmp_dir.join("bin"), "mysqld");
         if !mysqld.is_file() {
             return Err("o pacote do MySQL não contém o mysqld".into());
         }
@@ -256,16 +275,9 @@ pub fn install(base: &Path, version: &str, progress: &dyn Fn(InstallProgress)) -
             return Err(format!("verificação falhou ({}): {detail}.{hint}", out.status));
         }
 
-        let _ = fs::remove_dir_all(&final_dir);
-        fs::rename(&tmp_dir, &final_dir).map_err(|e| e.to_string())?;
+        let _ = fs::remove_dir_all(final_dir);
+        fs::rename(tmp_dir, final_dir).map_err(|e| e.to_string())?;
         Ok(())
-    })();
-
-    let _ = fs::remove_file(&archive);
-    if result.is_err() {
-        let _ = fs::remove_dir_all(&tmp_dir);
-    }
-    result
 }
 
 /// Explica como instalar a biblioteca do sistema que o `mysqld` não achou (só acontece no Linux).
@@ -353,7 +365,7 @@ fn managed_installs(base: &Path) -> Vec<MysqlInstall> {
     rd.flatten()
         .filter_map(|e| {
             let version = e.file_name().to_string_lossy().to_string();
-            let mysqld = e.path().join("bin").join("mysqld");
+            let mysqld = crate::platform::bin(&e.path().join("bin"), "mysqld");
             (valid_version(&version) && mysqld.is_file()).then(|| MysqlInstall {
                 series: series_of(&version),
                 full_version: version,
@@ -376,6 +388,28 @@ fn mysqld_version(bin: &Path) -> Option<String> {
 fn system_installs() -> Vec<MysqlInstall> {
     let mut seen = std::collections::HashSet::new();
     let mut out = vec![];
+    #[cfg(windows)]
+    {
+        let mut candidates: Vec<PathBuf> = vec![];
+        if let Ok(rd) = fs::read_dir(r"C:\Program Files\MySQL") {
+            for e in rd.flatten() {
+                candidates.push(e.path().join("bin").join("mysqld.exe"));
+            }
+        }
+        if let Some(path) = std::env::var_os("PATH") {
+            candidates.extend(std::env::split_paths(&path).filter(|d| d.is_absolute()).map(|d| d.join("mysqld.exe")));
+        }
+        for c in candidates {
+            let Ok(real) = fs::canonicalize(&c) else { continue };
+            if !seen.insert(real) {
+                continue;
+            }
+            if let Some(v) = mysqld_version(&c) {
+                out.push(MysqlInstall { series: series_of(&v), full_version: v, mysqld: c, managed: false });
+            }
+        }
+        return out;
+    }
     let mut candidates: Vec<PathBuf> = ["/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin", "/usr/local/sbin"]
         .iter()
         .map(|d| Path::new(d).join("mysqld"))

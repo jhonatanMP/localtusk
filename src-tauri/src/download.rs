@@ -63,6 +63,37 @@ pub fn unpack_zip(archive: &Path, dest: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Extrai um `.zip` descartando a pasta raiz do pacote e mantendo só o que `keep`
+/// aceita (usado pelo MySQL no Windows, cujo pacote completo passa de 1 GB).
+#[cfg(windows)]
+pub fn unpack_zip_filtered(archive: &Path, dest: &Path, keep: &dyn Fn(&Path) -> bool) -> Result<(), String> {
+    let file = File::open(archive).map_err(|e| e.to_string())?;
+    let mut zip = zip::ZipArchive::new(file).map_err(|e| format!("pacote inválido: {e}"))?;
+    for i in 0..zip.len() {
+        let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
+        let Some(full) = entry.enclosed_name() else { continue };
+        let comps: Vec<std::path::Component> = full.components().skip(1).collect();
+        if comps.is_empty() || !comps.iter().all(|c| matches!(c, std::path::Component::Normal(_))) {
+            continue;
+        }
+        let rel: PathBuf = comps.iter().collect();
+        if !keep(&rel) {
+            continue;
+        }
+        let out = dest.join(&rel);
+        if entry.is_dir() {
+            std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
+        } else {
+            if let Some(parent) = out.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            let mut w = File::create(&out).map_err(|e| e.to_string())?;
+            std::io::copy(&mut entry, &mut w).map_err(|e| format!("falha ao extrair {}: {e}", rel.display()))?;
+        }
+    }
+    Ok(())
+}
+
 /// Baixa `url` para `dest`, seguindo redirecionamentos. `on_progress(baixado, total)` é
 /// chamado com no máximo ~6 eventos por segundo e uma vez ao final.
 pub fn download_to(
