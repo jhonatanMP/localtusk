@@ -76,6 +76,24 @@ jobs:
           Get-Content C:\ltt\pg-out.txt, C:\ltt\pg-err.txt -ErrorAction SilentlyContinue
           exit $proc.ExitCode
 
+      - name: Diagnóstico do redis-server (em caso de falha)
+        if: failure()
+        run: |
+          $server = Get-ChildItem C:\ltt\tmp -Recurse -Filter redis-server.exe | Select-Object -First 1
+          Write-Host "redis-server: $($server.FullName)"
+          Set-Content C:\ltt\probe.conf "port 7799`nbind 127.0.0.1`ndaemonize no`ndir `"C:/ltt/tmp`"`nsave ''`nappendonly no"
+          Write-Host "--- como admin:"
+          $p1 = Start-Process $server.FullName -ArgumentList 'C:\ltt\probe.conf' -PassThru -NoNewWindow -RedirectStandardOutput C:\ltt\probe-admin.out -RedirectStandardError C:\ltt\probe-admin.err
+          if (-not $p1.WaitForExit(6000)) { $p1.Kill(); Write-Host "(seguiu no ar: ok)" } else { Write-Host "exit=$($p1.ExitCode)" }
+          Get-Content C:\ltt\probe-admin.out, C:\ltt\probe-admin.err -ErrorAction SilentlyContinue
+          Write-Host "--- como lttest:"
+          $sec = ConvertTo-SecureString "Ltt#pass123" -AsPlainText -Force
+          $cred = [System.Management.Automation.PSCredential]::new("lttest", $sec)
+          $inner = "& '$($server.FullName)' C:\ltt\probe.conf; exit `$LASTEXITCODE"
+          $p2 = Start-Process powershell -Credential $cred -ArgumentList @('-NoProfile', '-Command', $inner) -PassThru -NoNewWindow -RedirectStandardOutput C:\ltt\probe-user.out -RedirectStandardError C:\ltt\probe-user.err
+          if (-not $p2.WaitForExit(6000)) { $p2.Kill(); Write-Host "(seguiu no ar: ok)" } else { Write-Host "exit=$($p2.ExitCode)" }
+          Get-Content C:\ltt\probe-user.out, C:\ltt\probe-user.err -ErrorAction SilentlyContinue
+
       - name: Logs dos projetos (em caso de falha)
         if: failure()
         run: Get-ChildItem C:\ltt\tmp -Recurse -Filter *.log | ForEach-Object { Write-Host "===== $($_.FullName)"; Get-Content $_.FullName -Tail 30 }
