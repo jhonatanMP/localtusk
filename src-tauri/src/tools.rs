@@ -101,9 +101,12 @@ fn php_fpm_candidates() -> Vec<PathBuf> {
     let mut out = vec![];
     #[cfg(windows)]
     {
-        for p in homebrew_prefixes().into_iter().chain(SYSTEM_DIRS.iter().map(PathBuf::from)) {
-            out.push(p.join("php-fpm.exe"));
-            out.push(p.join("php").join("php-fpm.exe"));
+        // Sem PHP-FPM no Windows: o servidor é o php-cgi.exe do PHP oficial (ou do XAMPP).
+        for d in [r"C:\php", r"C:\xampp\php", r"C:\tools\php"] {
+            out.push(Path::new(d).join("php-cgi.exe"));
+        }
+        if let Some(p) = find_in_system("php-cgi") {
+            out.push(p);
         }
         return out;
     }

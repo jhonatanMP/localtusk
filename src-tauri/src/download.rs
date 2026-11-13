@@ -40,6 +40,29 @@ pub fn get_string(url: &str) -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
+/// Extrai um `.zip` em `dest` (usado pelos pacotes do Windows). Rejeita caminhos
+/// que escapem da pasta de destino.
+#[cfg(windows)]
+pub fn unpack_zip(archive: &Path, dest: &Path) -> Result<(), String> {
+    let file = File::open(archive).map_err(|e| e.to_string())?;
+    let mut zip = zip::ZipArchive::new(file).map_err(|e| format!("pacote inválido: {e}"))?;
+    for i in 0..zip.len() {
+        let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
+        let Some(rel) = entry.enclosed_name() else { continue };
+        let out = dest.join(&rel);
+        if entry.is_dir() {
+            std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
+        } else {
+            if let Some(parent) = out.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            let mut w = File::create(&out).map_err(|e| e.to_string())?;
+            std::io::copy(&mut entry, &mut w).map_err(|e| format!("falha ao extrair {}: {e}", rel.display()))?;
+        }
+    }
+    Ok(())
+}
+
 /// Baixa `url` para `dest`, seguindo redirecionamentos. `on_progress(baixado, total)` é
 /// chamado com no máximo ~6 eventos por segundo e uma vez ao final.
 pub fn download_to(
