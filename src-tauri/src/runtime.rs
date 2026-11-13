@@ -156,10 +156,6 @@ fn q(path: &Path) -> String {
 }
 
 
-#[cfg(not(windows))]
-fn msys_path(p: &Path) -> String {
-    q(p)
-}
 
 struct MailCfg {
     bin: PathBuf,
