@@ -61,7 +61,8 @@ impl PhpInstall {
     /// ou `../bin/php` no Homebrew).
     pub fn cli(&self) -> Option<PathBuf> {
         let dir = self.fpm.parent()?;
-        let mut candidates = vec![dir.join("php")];
+        // `platform::bin` põe o `.exe` no Windows; sem ele o CLI não é achado lá.
+        let mut candidates = vec![crate::platform::bin(dir, "php"), dir.join("php")];
         if !self.managed {
             candidates.push(dir.join("../bin/php"));
             candidates.push(crate::platform::bin(dir, "php"));
