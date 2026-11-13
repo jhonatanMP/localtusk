@@ -32,6 +32,7 @@ pub fn php_root(base: &Path) -> PathBuf {
     base.join("bin").join("php")
 }
 
+#[allow(unreachable_code)]
 pub fn install_dir(base: &Path, version: &str) -> PathBuf {
     php_root(base).join(version)
 }
@@ -197,6 +198,7 @@ fn install_win(base: &Path, version: &str, progress: &dyn Fn(InstallProgress)) -
 }
 
 /// Consulta o servidor e devolve todas as versões disponíveis para esta máquina.
+#[allow(unreachable_code)]
 pub fn catalog(base: &Path) -> Result<Vec<PhpRelease>, String> {
     #[cfg(windows)]
     {
@@ -360,6 +362,7 @@ pub fn install(
 
 /// Garante o PHP CLI de uma versão instalada pelo app (versões instaladas antes de o
 /// app baixar o CLI não o têm). Bloqueante.
+#[allow(unreachable_code)]
 pub fn ensure_cli(base: &Path, version: &str, progress: &dyn Fn(InstallProgress)) -> Result<PathBuf, String> {
     if !valid_version(version) {
         return Err("versão inválida".into());
@@ -460,6 +463,7 @@ fn pick_common_version(listing: &serde_json::Value, full_version: &str, platform
 
 /// Garante o PHP com `pdo_pgsql` para uma versão instalada pelo app. Baixa o PHP-FPM e o CLI
 /// do pacote "common" na primeira vez. Bloqueante.
+#[allow(unreachable_code)]
 pub fn ensure_pg_flavor(base: &Path, full_version: &str, progress: &dyn Fn(InstallProgress)) -> Result<(), String> {
     if !valid_version(full_version) {
         return Err("versão inválida".into());
@@ -532,6 +536,7 @@ pub fn ensure_pg_flavor(base: &Path, full_version: &str, progress: &dyn Fn(Insta
 
 /// PHP-FPM a usar num projeto: o do pacote "common" quando o banco é PostgreSQL (baixado
 /// aqui se faltar), senão o normal. PHP do sistema (Homebrew) já vem com `pdo_pgsql`.
+#[allow(unreachable_code)]
 pub fn fpm_for(base: &Path, php: &tools::PhpInstall, postgres: bool) -> Result<PathBuf, String> {
     #[cfg(windows)]
     {

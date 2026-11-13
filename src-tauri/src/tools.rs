@@ -97,6 +97,7 @@ pub fn homebrew_prefixes() -> Vec<PathBuf> {
     ["/opt/homebrew", "/usr/local"].into_iter().map(PathBuf::from).collect()
 }
 
+#[allow(unreachable_code)]
 fn php_fpm_candidates() -> Vec<PathBuf> {
     let mut out = vec![];
     #[cfg(windows)]

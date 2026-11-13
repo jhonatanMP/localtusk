@@ -22,6 +22,7 @@ pub fn mysql_root(base: &Path) -> PathBuf {
     base.join("bin").join("mysql")
 }
 
+#[allow(unreachable_code)]
 pub fn install_dir(base: &Path, version: &str) -> PathBuf {
     mysql_root(base).join(version)
 }

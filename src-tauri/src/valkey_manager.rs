@@ -26,6 +26,7 @@ pub fn valkey_root(base: &Path) -> PathBuf {
     base.join("bin").join("valkey")
 }
 
+#[allow(unreachable_code)]
 pub fn install_dir(base: &Path, version: &str) -> PathBuf {
     valkey_root(base).join(version)
 }
