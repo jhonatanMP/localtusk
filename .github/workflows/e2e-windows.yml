@@ -63,8 +63,8 @@ jobs:
           TEMP: C:\ltt\tmp
           TMP: C:\ltt\tmp
         run: |
-          cargo test --locked --lib --no-run
-          $exe = Get-ChildItem target\debug\deps\localtusk_lib-*.exe | Sort-Object LastWriteTime | Select-Object -Last 1
+          $exePath = cargo test --locked --lib --no-run --message-format json | ConvertFrom-Json | Where-Object { $_.executable } | Select-Object -Last 1 -ExpandProperty executable
+          $exe = Get-Item $exePath
           Write-Host "binário de teste: $($exe.FullName)"
           net user lttest "Ltt#pass123" /add | Out-Null
           icacls target /grant "lttest:(OI)(CI)M" /T /Q | Out-Null
