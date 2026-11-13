@@ -5,8 +5,6 @@ Gratuito e open source (MIT). Funciona no **macOS** (Apple Silicon e Intel) e no
 
 Cada projeto roda com processos nativos isolados: **Caddy** (web) + **PHP-FPM** + **MySQL** ou **PostgreSQL** (e **Redis**, se você ligar), cada um com sua porta e seus dados em `~/LocalTusk/projects/<projeto>/`.
 
-> **Veio do LocalPHP?** O app mudou de nome na v0.6.0. Na primeira abertura, a pasta `~/LocalPHP` é renomeada sozinha para `~/LocalTusk`, com projetos, bancos, backups e blueprints intactos.
-
 ## Estado atual (MVP)
 
 - [x] Criar, iniciar, parar e apagar projetos
