@@ -1681,6 +1681,16 @@ echo 'ext=' . (extension_loaded('pdo_pgsql') ? 'pdo_pgsql' : 'sem') . "\n";
         )
         .unwrap();
 
+        #[cfg(windows)]
+        {
+            // Diagnóstico do PECL: sem php_redis.dll carregada a página quebra.
+            let cli = crate::php_manager::ensure_cli(&base, &php.full_version, &|_| {}).expect("php cli");
+            let mods = Command::new(&cli).args(["-c", "NUL", "-m"]).output().unwrap();
+            println!("php -m (sem ini): {}", String::from_utf8_lossy(&mods.stdout).replace('\n', ","));
+            let ext_dir = cli.parent().unwrap().join("ext");
+            let dlls: Vec<String> = fs::read_dir(&ext_dir).map(|rd| rd.filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().to_string())).filter(|n| n.contains("redis") || n.contains("igbinary")).collect()).unwrap_or_default();
+            println!("dlls pecl em ext/: {dlls:?}");
+        }
         let t = Instant::now();
         let mut running = start(&base, &p).expect("start falhou");
         println!("start (com download do PHP common) em {:?}", t.elapsed());

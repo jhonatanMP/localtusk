@@ -73,7 +73,12 @@ jobs:
           $sec = ConvertTo-SecureString "Ltt#pass123" -AsPlainText -Force
           $cred = [System.Management.Automation.PSCredential]::new("lttest", $sec)
           $inner = "`$env:TEMP='C:\ltt\tmp'; `$env:TMP='C:\ltt\tmp'; & '$($exe.FullName)' runtime::tests::postgres_redis_end_to_end --ignored --nocapture; exit `$LASTEXITCODE"
-          $proc = Start-Process powershell -Credential $cred -WorkingDirectory $PWD -ArgumentList @('-NoProfile', '-Command', $inner) -Wait -PassThru -NoNewWindow -RedirectStandardOutput C:\ltt\pg-out.txt -RedirectStandardError C:\ltt\pg-err.txt
+          # Sem -Wait: no PowerShell 7 ele espera a árvore inteira, e os serviços que o
+          # teste deixa no ar (quando falha) segurariam o passo até o timeout.
+          $proc = Start-Process powershell -Credential $cred -WorkingDirectory $PWD -ArgumentList @('-NoProfile', '-Command', $inner) -PassThru -NoNewWindow -RedirectStandardOutput C:\ltt\pg-out.txt -RedirectStandardError C:\ltt\pg-err.txt
+          $deadline = (Get-Date).AddMinutes(15)
+          while (-not $proc.HasExited -and (Get-Date) -lt $deadline) { Start-Sleep 5 }
+          if (-not $proc.HasExited) { $proc.Kill(); Write-Host "teste estourou 15 minutos"; exit 124 }
           Get-Content C:\ltt\pg-out.txt, C:\ltt\pg-err.txt -ErrorAction SilentlyContinue
           exit $proc.ExitCode
 
