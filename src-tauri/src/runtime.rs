@@ -1003,7 +1003,28 @@ pub fn project_processes(base: &Path, id: &str) -> Vec<(i32, String)> {
     let Ok(out) = Command::new("powershell").args(["-NoProfile", "-NonInteractive", "-Command", &script]).output() else {
         return vec![];
     };
-    parse_win_processes(&String::from_utf8_lossy(&out.stdout), &needle, std::process::id())
+    let mut found = parse_win_processes(&String::from_utf8_lossy(&out.stdout), &needle, std::process::id());
+    // O Redis roda com cwd na pasta conf e a linha de comando só tem "valkey.conf"
+    // (sem o caminho do projeto): ele é achado pela porta em que está escutando.
+    let redis_port = project::load(base).iter().find(|x| x.id == id).map(|x| x.redis_port).unwrap_or(0);
+    if redis_port > 0 && !found.iter().any(|(_, c)| c.contains("redis-server") || c.contains("valkey-server")) {
+        let script = format!(
+            "$c = Get-NetTCPConnection -LocalPort {redis_port} -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1;              if ($c) {{ $p = Get-CimInstance Win32_Process -Filter "ProcessId = $($c.OwningProcess)";              if ($p -and ($p.Name -eq 'redis-server.exe' -or $p.Name -eq 'valkey-server.exe')) {{ "$($p.ProcessId)`t$($p.Name)`t$($p.CommandLine)" }} }}"
+        );
+        if let Ok(out) = Command::new("powershell").args(["-NoProfile", "-NonInteractive", "-Command", &script]).output() {
+            for line in String::from_utf8_lossy(&out.stdout).lines() {
+                let mut parts = line.splitn(3, '\t');
+                if let (Some(pid), Some(_), Some(cmd)) = (parts.next(), parts.next(), parts.next()) {
+                    if let Ok(pid) = pid.trim().parse::<i32>() {
+                        if pid as u32 != std::process::id() && !found.iter().any(|(f, _)| *f == pid) {
+                            found.push((pid, cmd.trim().to_string()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    found
 }
 
 #[cfg(windows)]
@@ -1820,7 +1841,7 @@ println!("fase: órfãos");
             });
         }
         let found = project_processes(&base, &p.id);
-        let names: Vec<String> = found.iter().map(|(_, c)| c.split_whitespace().next().unwrap_or("").rsplit(['/', '\\']).next().unwrap_or("").to_string()).collect();
+        let names: Vec<String> = found.iter().map(|(_, c)| c.split_whitespace().next().unwrap_or("").rsplit(['/', '\\']).next().unwrap_or("").trim_matches('"').to_string()).collect();
         println!("órfãos reconhecidos: {names:?}");
         let expected: &[&str] = if cfg!(windows) { &["postgres.exe", "redis-server.exe", "caddy.exe"] } else { &["postgres", "valkey-server", "caddy"] };
         for expected in expected {
