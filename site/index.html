@@ -457,7 +457,7 @@
             <li>Windows e Linux são beta: a pilha completa passa nos testes automáticos (no Windows, com runners do GitHub; no Linux, no Ubuntu 24.04 ARM64), mas ainda tem poucas horas de uso real, e o HTTPS precisa ter o certificado instalado à mão. No Windows o Redis é o build comunitário do projeto redis-windows, não um binário oficial.</li>
             <li>Importar sites do Local por enquanto só funciona no macOS e no Linux: no Windows o Local guarda os dados em outro formato.</li>
             <li>Outras linguagens e bancos: por enquanto o app cobre PHP 8.x com MySQL ou PostgreSQL e Redis (MongoDB e outros ficam de fora). O WordPress só funciona em projetos MySQL.</li>
-            <li>Mapa do projeto: a leitura é estática e feita para PHP puro e Composer. Ela não enxerga hooks do WordPress, rotas, nomes de classe montados em variável nem <code>require</code> com variável, então um arquivo carregado assim pode aparecer como órfão por engano. Use o resultado como pista, não como ordem para apagar.</li>
+            <li>Mapa do projeto: a leitura é estática e feita para PHP puro e Composer. Ela segue hooks do WordPress com nome e callback escritos no código (<code>add_action</code>/<code>add_filter</code>), mas não enxerga rotas, hooks com nome montado em variável, nomes de classe montados em variável nem <code>require</code> com variável, então um arquivo carregado assim pode aparecer como órfão por engano. Use o resultado como pista, não como ordem para apagar.</li>
             <li>Anos de estrada: é um projeto novo, com comunidade pequena.</li>
           </ul>
         </div>
@@ -534,7 +534,7 @@ Software…</div>
           </details>
           <details>
             <summary>O que o Mapa do projeto mostra? <svg class="ico"><use href="assets/img/icons.svg#i-chevron"/></svg></summary>
-            <div class="answer">É uma aba que lê os arquivos PHP do projeto, sem executar nada, e mostra quais arquivos chamam quais, em lista ou em grafo. Serve para entender um projeto herdado e para achar arquivos que nenhum outro usa. A leitura segue <code>require</code>, <code>include</code> e classes ligadas por <code>use</code>, <code>new</code> e <code>extends</code>. O que é chamado por variável, hook ou rota não aparece, então trate os órfãos como pistas.</div>
+            <div class="answer">É uma aba que lê os arquivos PHP do projeto, sem executar nada, e mostra quais arquivos chamam quais, em lista ou em grafo. Serve para entender um projeto herdado e para achar arquivos que nenhum outro usa. A leitura segue <code>require</code>, <code>include</code>, classes ligadas por <code>use</code>, <code>new</code> e <code>extends</code>, e hooks do WordPress com nome e callback escritos no código. O que é chamado por variável, hook com nome montado na hora ou rota não aparece, então trate os órfãos como pistas.</div>
           </details>
           <details>
             <summary>Uso o Local (LocalWP). Consigo trazer meus sites? <svg class="ico"><use href="assets/img/icons.svg#i-chevron"/></svg></summary>

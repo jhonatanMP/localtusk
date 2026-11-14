@@ -99,7 +99,7 @@ export function CodeMapTab({ project, onError }: { project: Project; onError: (m
           </p>
           <p className="muted small">
             A leitura é estática: ela segue <code>require</code>/<code>include</code> com caminho fixo e classes ligadas por{" "}
-            <code>use</code>, <code>new</code>, <code>extends</code> e afins. Arquivos chamados por variável, hook, rota ou tarefa agendada
+            <code>use</code>, <code>new</code>, <code>extends</code> e afins, e hooks do WordPress com nome e callback escritos no código. Arquivos chamados por variável, hook com nome montado na hora, rota ou tarefa agendada
             podem aparecer como <b>sem uso</b> por engano. Trate a lista como pistas, não como ordem para apagar.
           </p>
           <p className="muted small">
@@ -253,10 +253,19 @@ function Detail({ file, onPick }: { file: CodeFile; onPick: (path: string) => vo
         </div>
       )}
 
+      {file.hooks.length > 0 && (
+        <div className="map-classes">
+          <span className="muted small">Hooks que registra:</span>
+          {file.hooks.map((h) => (
+            <code key={h}>{h}</code>
+          ))}
+        </div>
+      )}
+
       {file.kind === "orphan" && (
         <div className="banner warn">
           <Icon name="alert" />
-          <span>Nenhum arquivo do projeto chama este. Pode estar parado, ou ser chamado de um jeito que a leitura não enxerga (variável, hook, rota, tarefa agendada).</span>
+          <span>Nenhum arquivo do projeto chama este. Pode estar parado, ou ser chamado de um jeito que a leitura não enxerga (variável, hook com nome montado na hora, rota, tarefa agendada).</span>
         </div>
       )}
       {file.kind === "unreachable" && (
@@ -297,7 +306,7 @@ function LinkList(props: { title: string; empty: string; links: CodeFile["uses"]
                     <span className="dir">{dir}</span>
                     {name}
                   </span>
-                  <span className="map-via">{l.via === "include" ? "require" : "classe"}</span>
+                  <span className="map-via">{l.via === "include" ? "require" : l.via}</span>
                 </button>
               </li>
             );

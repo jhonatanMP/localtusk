@@ -135,8 +135,8 @@ export type FileKind = "entry" | "normal" | "orphan" | "unreachable";
 
 export interface CodeLink {
   path: string;
-  /** `include` (require/include) ou `classe` (uso de uma classe declarada no outro arquivo). */
-  via: "include" | "classe";
+  /** `include` (require/include), `classe` (uso de classe de outro arquivo) ou `hook` (WordPress). */
+  via: "include" | "classe" | "hook";
 }
 
 export interface CodeFile {
@@ -145,6 +145,8 @@ export interface CodeFile {
   entryReason: string | null;
   lines: number;
   classes: string[];
+  /** Hooks do WordPress que o arquivo registra (add_action/add_filter literais). */
+  hooks: string[];
   uses: CodeLink[];
   usedBy: CodeLink[];
   dynamicIncludes: number;

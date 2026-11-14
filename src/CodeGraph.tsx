@@ -118,7 +118,7 @@ function pickVisible(files: CodeFile[], byPath: Map<string, CodeFile>, focus: st
 
 interface Layout {
   pos: Map<string, { x: number; y: number }>;
-  edges: { from: string; to: string; via: "include" | "classe" }[];
+  edges: { from: string; to: string; via: "include" | "classe" | "hook" }[];
   isolated: number;
   labelAt: { x: number; y: number } | null;
 }
@@ -247,7 +247,7 @@ function GraphInner({ files, selected, onSelect, query, onQuery }: CodeGraphProp
           style: {
             stroke: color,
             strokeWidth: hot ? 2 : 1.2,
-            strokeDasharray: e.via === "classe" ? "5 4" : undefined,
+            strokeDasharray: e.via === "classe" ? "5 4" : e.via === "hook" ? "2 3" : undefined,
             opacity: selected && !hot ? 0.22 : 0.9,
           },
         };
@@ -334,6 +334,12 @@ function GraphInner({ files, selected, onSelect, query, onQuery }: CodeGraphProp
             <line x1="0" y1="4" x2="26" y2="4" stroke="#8a90b8" strokeWidth="1.5" strokeDasharray="5 4" />
           </svg>{" "}
           classe
+        </span>
+        <span>
+          <svg width="26" height="8" aria-hidden="true">
+            <line x1="0" y1="4" x2="26" y2="4" stroke="#8a90b8" strokeWidth="1.5" strokeDasharray="2 3" />
+          </svg>{" "}
+          hook do WordPress
         </span>
         <span className="graph-count">
           {layout.pos.size} arquivos · {linkCount} ligações

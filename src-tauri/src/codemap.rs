@@ -3,10 +3,14 @@
 //! A análise é estática e propositalmente simples (sem executar nada). Ela enxerga:
 //! - `require`/`include` com caminho literal, `__DIR__` ou `dirname(__FILE__)`;
 //! - classes usadas por `use`, `new`, `Classe::`, `extends`, `implements`, `instanceof`, `catch`
-//!   e tipos de parâmetro, retorno e propriedade, ligadas ao arquivo que declara a classe.
+//!   e tipos de parâmetro, retorno e propriedade, ligadas ao arquivo que declara a classe;
+//! - hooks do WordPress: `add_action`/`add_filter` com nome e callback literais (função,
+//!   `'Classe::metodo'`, `['Classe', 'metodo']`, `[Classe::class, 'metodo']` ou closure) e
+//!   quem dispara o hook com `do_action`/`apply_filters`. Em projetos WordPress, o arquivo
+//!   principal de cada plugin, os mu-plugins e o `functions.php` do tema são pontos de entrada.
 //!
-//! O que ela não consegue ver (`require $variavel`, hooks do WordPress, rotas por nome) fica
-//! registrado em `dynamic_includes`, para a tela avisar que o resultado pode ter falsos órfãos.
+//! O que ela não consegue ver (`require $variavel`, hook com nome montado em variável, rotas
+//! por nome) fica registrado em `dynamic_includes`, para a tela avisar que pode ter falsos órfãos.
 
 use regex::Regex;
 use serde::Serialize;
@@ -37,7 +41,8 @@ pub enum Kind {
 #[serde(rename_all = "camelCase")]
 pub struct Link {
     pub path: String,
-    /// `include` (require/include) ou `classe` (uso de uma classe declarada no outro arquivo).
+    /// `include` (require/include), `classe` (uso de uma classe declarada no outro arquivo)
+    /// ou `hook` (hook do WordPress ligando quem registra/dispara ao dono do callback).
     pub via: String,
 }
 
@@ -50,6 +55,8 @@ pub struct FileInfo {
     pub entry_reason: Option<String>,
     pub lines: u32,
     pub classes: Vec<String>,
+    /// Hooks do WordPress que este arquivo registra (`add_action`/`add_filter` literais).
+    pub hooks: Vec<String>,
     pub uses: Vec<Link>,
     pub used_by: Vec<Link>,
     /// `require`/`include` cujo caminho depende de variável e que a análise não resolve.
@@ -174,6 +181,17 @@ fn clean(code: &str) -> (String, String) {
     (with, without)
 }
 
+/// Callback de um `add_action`/`add_filter` como dá para resolver sem rodar nada.
+#[derive(Debug, Clone, PartialEq)]
+enum HookCb {
+    /// Nome de uma função solta: `'minha_funcao'`.
+    Func(String),
+    /// Classe do callback, já com os candidatos de nome completo (`'Classe::m'`, `['Classe', 'm']`).
+    Class(Vec<String>),
+    /// Closure ou método do próprio arquivo (`[$this, 'm']`, `[self::class, 'm']` sem classe clara).
+    Own,
+}
+
 #[derive(Debug, Default)]
 struct Parsed {
     lines: u32,
@@ -181,6 +199,63 @@ struct Parsed {
     /// Nomes de classe como aparecem no código, já resolvidos para o nome completo (candidatos).
     class_refs: Vec<Vec<String>>,
     includes: Vec<String>,
+    /// Funções nomeadas declaradas no arquivo (`function nome(...)`), para callbacks em texto.
+    functions: Vec<String>,
+    /// (hook, callback) de cada `add_action`/`add_filter` com nome literal.
+    hooks_reg: Vec<(String, HookCb)>,
+    /// Hooks disparados com `do_action`/`apply_filters` de nome literal.
+    hooks_fired: Vec<String>,
+    /// O começo do arquivo tem o cabeçalho `Plugin Name:` de um plugin do WordPress.
+    plugin_header: bool,
+}
+
+/// Classifica o callback que vem logo depois de `add_action('hook',` no código-fonte.
+fn parse_callback(chunk: &str, resolve: &dyn Fn(&str) -> Vec<String>, declared: &[String]) -> Option<HookCb> {
+    let c = chunk.trim_start();
+    // Closure: `function (...)`, `fn (...)`, `static function (...)`.
+    let lower = c.to_ascii_lowercase();
+    for kw in ["static function", "static fn", "function", "fn"] {
+        if lower.starts_with(kw) && c[kw.len()..].starts_with([' ', '(']) {
+            return Some(HookCb::Own);
+        }
+    }
+    // Texto: `'funcao'` ou `'Classe::metodo'`.
+    if c.starts_with(['\'', '"']) {
+        let q = c.chars().next()?;
+        let inner = &c[1..c[1..].find(q).map(|e| e + 1)?];
+        return Some(match inner.split_once("::") {
+            Some((class, _)) if class.eq_ignore_ascii_case("self") || class.eq_ignore_ascii_case("static") => {
+                declared.first().map(|d| HookCb::Class(vec![d.clone()])).unwrap_or(HookCb::Own)
+            }
+            Some((class, _)) => HookCb::Class(resolve(class)),
+            None => HookCb::Func(inner.trim_start_matches('\\').to_string()),
+        });
+    }
+    // Array: `['Classe', 'm']`, `[Classe::class, 'm']`, `[$this, 'm']`, `array('Classe', 'm')`.
+    let inner = if let Some(rest) = c.strip_prefix('[') {
+        rest
+    } else if lower.starts_with("array") {
+        c[5..].trim_start().strip_prefix('(')?
+    } else {
+        return None;
+    };
+    let inner = inner.trim_start();
+    if inner.starts_with("$this") {
+        return Some(HookCb::Own);
+    }
+    if inner.starts_with(['\'', '"']) {
+        let q = inner.chars().next()?;
+        let class = &inner[1..inner[1..].find(q).map(|e| e + 1)?];
+        return Some(HookCb::Class(resolve(class)));
+    }
+    let ident: String = inner.chars().take_while(|ch| ch.is_alphanumeric() || *ch == '_' || *ch == '\\').collect();
+    if ident.is_empty() {
+        return None;
+    }
+    if ident.eq_ignore_ascii_case("self") || ident.eq_ignore_ascii_case("static") {
+        return Some(declared.first().map(|d| HookCb::Class(vec![d.clone()])).unwrap_or(HookCb::Own));
+    }
+    Some(HookCb::Class(resolve(&ident)))
 }
 
 const NOT_CLASSES: &[&str] = &[
@@ -214,6 +289,11 @@ fn parse(source: &str) -> Parsed {
     static RET: OnceLock<Regex> = OnceLock::new();
     static PROP: OnceLock<Regex> = OnceLock::new();
     static INC: OnceLock<Regex> = OnceLock::new();
+    static FUNC: OnceLock<Regex> = OnceLock::new();
+    static REGSQ: OnceLock<Regex> = OnceLock::new();
+    static REGDQ: OnceLock<Regex> = OnceLock::new();
+    static FIRESQ: OnceLock<Regex> = OnceLock::new();
+    static FIREDQ: OnceLock<Regex> = OnceLock::new();
 
     let mut out = Parsed { lines: source.lines().count() as u32, ..Default::default() };
     let (with, code) = clean(&php_only(source));
@@ -336,6 +416,37 @@ fn parse(source: &str) -> Parsed {
         let expr = strip_parens(c[1].trim());
         out.includes.push(expr.to_string());
     }
+
+    for c in re(&FUNC, r"\bfunction\s+([A-Za-z_]\w*)\s*\(").captures_iter(&code) {
+        out.functions.push(c[1].to_string());
+    }
+
+    // Hooks do WordPress: nome e callback estão nas strings, então a leitura usa a versão
+    // com texto (`with`). Nome com `$` é montado em variável — fica de fora.
+    let re_reg_sq = re(&REGSQ, r"\b(?:add_action|add_filter)\s*\(\s*'([^']+)'\s*,\s*");
+    let re_reg_dq = re(&REGDQ, r#"\b(?:add_action|add_filter)\s*\(\s*"([^"]+)"\s*,\s*"#);
+    for re_hook in [re_reg_sq, re_reg_dq] {
+        for m in re_hook.captures_iter(&with) {
+            let (name, whole) = (&m[1], m.get(0).unwrap());
+            if name.contains('$') {
+                continue;
+            }
+            let chunk: String = with[whole.end()..].chars().take(140).collect();
+            if let Some(cb) = parse_callback(&chunk, &resolve, &out.declared) {
+                out.hooks_reg.push((name.to_string(), cb));
+            }
+        }
+    }
+    let re_fire_sq = re(&FIRESQ, r"\b(?:do_action|apply_filters|do_action_ref_array|apply_filters_ref_array)\s*\(\s*'([^']+)'");
+    let re_fire_dq = re(&FIREDQ, r#"\b(?:do_action|apply_filters|do_action_ref_array|apply_filters_ref_array)\s*\(\s*"([^"]+)""#);
+    for re_fire in [re_fire_sq, re_fire_dq] {
+        for c in re_fire.captures_iter(&with) {
+            if !c[1].contains('$') {
+                out.hooks_fired.push(c[1].to_string());
+            }
+        }
+    }
+    out.plugin_header = source.chars().take(8192).collect::<String>().contains("Plugin Name:");
     out
 }
 
@@ -505,6 +616,28 @@ fn composer_files(root: &Path) -> (bool, Vec<String>) {
 }
 
 /// Lê o projeto em `root`. `docroot` é a pasta pública relativa a ele (vazia = a própria raiz).
+/// Pontos de entrada que só existem num projeto WordPress: arquivo principal de plugin
+/// (com o cabeçalho `Plugin Name:`), mu-plugins e o `functions.php` de cada tema.
+fn wp_entry_reason(r: &str, plugin_header: bool) -> Option<&'static str> {
+    if let Some(rest) = r.strip_prefix("wp-content/mu-plugins/") {
+        if !rest.contains('/') && rest.ends_with(".php") {
+            return Some("mu-plugin do WordPress");
+        }
+    }
+    if let Some(rest) = r.strip_prefix("wp-content/plugins/") {
+        if plugin_header && rest.matches('/').count() <= 1 && rest.ends_with(".php") {
+            return Some("plugin do WordPress");
+        }
+    }
+    if let Some(rest) = r.strip_prefix("wp-content/themes/") {
+        let mut parts = rest.split('/');
+        if let (Some(_), Some("functions.php"), None) = (parts.next(), parts.next(), parts.next()) {
+            return Some("tema do WordPress");
+        }
+    }
+    None
+}
+
 pub fn analyze(root: &Path, docroot: &str) -> CodeMap {
     let mut paths = Vec::new();
     let mut truncated = false;
@@ -574,6 +707,52 @@ pub fn analyze(root: &Path, docroot: &str) -> CodeMap {
         }
     }
 
+    // Hooks do WordPress. Primeiro resolve o dono de cada callback registrado: função solta
+    // (índice de funções), classe (índice de classes) ou o próprio arquivo (closure/$this).
+    let mut function_file: HashMap<String, String> = HashMap::new();
+    for (i, p) in parsed.iter().enumerate() {
+        for f in &p.functions {
+            function_file.entry(f.to_ascii_lowercase()).or_insert_with(|| rels[i].clone());
+        }
+    }
+    let mut hook_targets: HashMap<String, Vec<String>> = HashMap::new();
+    let mut reg_targets: Vec<Vec<Option<String>>> = Vec::new();
+    for (i, p) in parsed.iter().enumerate() {
+        let mut mine = Vec::new();
+        for (hook, cb) in &p.hooks_reg {
+            let target = match cb {
+                HookCb::Own => Some(rels[i].clone()),
+                HookCb::Func(name) => function_file
+                    .get(&name.to_ascii_lowercase())
+                    .cloned()
+                    .or_else(|| name.rsplit('\\').next().and_then(|last| function_file.get(&last.to_ascii_lowercase()).cloned())),
+                HookCb::Class(cands) => cands.iter().find_map(|c| class_file.get(&c.to_ascii_lowercase()).cloned()),
+            };
+            if let Some(t) = &target {
+                hook_targets.entry(hook.clone()).or_default().push(t.clone());
+            }
+            mine.push(target);
+        }
+        reg_targets.push(mine);
+    }
+    // Quem registra aponta para o dono do callback; quem dispara o hook também.
+    for (i, p) in parsed.iter().enumerate() {
+        let from = rels[i].clone();
+        for target in &reg_targets[i] {
+            if let Some(to) = target {
+                let to = to.clone();
+                link(&from, &to, "hook");
+            }
+        }
+        for hook in &p.hooks_fired {
+            if let Some(targets) = hook_targets.get(hook) {
+                for to in targets.clone() {
+                    link(&from, &to, "hook");
+                }
+            }
+        }
+    }
+
     // Pontos de entrada.
     let (has_composer, composer_entries) = composer_files(root);
     let doc = docroot.trim_matches('/').to_string();
@@ -601,6 +780,22 @@ pub fn analyze(root: &Path, docroot: &str) -> CodeMap {
     for r in &rels {
         if let Some(why) = entry_reason(r) {
             reasons.insert(r.as_str(), why);
+        }
+    }
+
+    // WordPress: o núcleo carrega mu-plugins, plugins ativos e o functions.php do tema sem
+    // nenhum require visível a partir do docroot — sem isto, metade do projeto vira "órfão".
+    let is_wp = known.contains("wp-config.php")
+        || known.contains("wp-settings.php")
+        || rels.iter().any(|r| r.starts_with("wp-includes/"));
+    if is_wp {
+        for (i, r) in rels.iter().enumerate() {
+            if reasons.contains_key(r.as_str()) {
+                continue;
+            }
+            if let Some(why) = wp_entry_reason(r, parsed[i].plugin_header) {
+                reasons.insert(r.as_str(), why.to_string());
+            }
         }
     }
 
@@ -649,6 +844,12 @@ pub fn analyze(root: &Path, docroot: &str) -> CodeMap {
             entry_reason: reasons.get(r.as_str()).cloned(),
             lines: parsed[i].lines,
             classes: parsed[i].declared.clone(),
+            hooks: {
+                let mut h: Vec<String> = parsed[i].hooks_reg.iter().map(|(n, _)| n.clone()).collect();
+                h.sort();
+                h.dedup();
+                h
+            },
             uses: out_links,
             used_by: to_links(used_by.get(r)),
             dynamic_includes: dynamic_per_file.get(r).copied().unwrap_or(0),
@@ -670,6 +871,12 @@ pub fn analyze(root: &Path, docroot: &str) -> CodeMap {
     }
     if !has_entries && !files.is_empty() {
         notes.push("Nenhum ponto de entrada (index.php, pasta pública ou autoload do Composer) foi encontrado.".to_string());
+    }
+    if is_wp {
+        notes.push(
+            "Projeto WordPress: segui os hooks (add_action/add_filter) com nome e callback escritos no código, e marquei plugins, mu-plugins e o functions.php do tema como pontos de entrada. Hooks com nome montado em variável continuam invisíveis."
+                .to_string(),
+        );
     }
 
     CodeMap { files, total_links, entries, orphans, unreachable, dynamic_includes: total_dynamic, truncated, has_composer, notes }
@@ -781,6 +988,55 @@ mod tests {
             assert!(refs.iter().any(|r| r == esperado), "faltou {esperado} em {refs:?}");
         }
         assert_eq!(p.declared, vec!["A\\X".to_string()]);
+    }
+
+    #[test]
+    fn wordpress_hooks_e_entradas_de_plugin_e_tema() {
+        let root = std::env::temp_dir().join(format!("localtusk-codemap-wp-{}-{}", std::process::id(), crate::project::now()));
+        let _ = fs::remove_dir_all(&root);
+        write(&root, "wp-config.php", "<?php define('ABSPATH', __DIR__ . '/');\n");
+        write(&root, "wp-includes/plugin.php", "<?php do_action('init');\napply_filters('the_content', $c);\n");
+        write(
+            &root,
+            "wp-content/plugins/loja/loja.php",
+            "<?php\n/*\nPlugin Name: Loja\n*/\nadd_action('init', 'loja_init');\nadd_filter('the_content', ['Loja\\Filtros', 'embelezar']);\nadd_action('loja_pronto', function () {});\n",
+        );
+        write(&root, "wp-content/plugins/loja/includes/boot.php", "<?php function loja_init() {}\n");
+        write(&root, "wp-content/plugins/loja/includes/Filtros.php", "<?php\nnamespace Loja;\nclass Filtros { public static function embelezar($c) {} }\n");
+        write(&root, "wp-content/plugins/loja/includes/sem-uso.php", "<?php echo 9;\n");
+        write(&root, "wp-content/mu-plugins/cedo.php", "<?php // roda sempre\n");
+        write(&root, "wp-content/themes/tema/functions.php", "<?php add_action('wp_enqueue_scripts', ['Assets', 'registrar']);\n");
+        write(&root, "wp-content/themes/tema/inc/Assets.php", "<?php class Assets { public static function registrar() {} }\n");
+
+        let m = analyze(&root, "");
+
+        // Entradas do WordPress.
+        let loja = get(&m, "wp-content/plugins/loja/loja.php");
+        assert_eq!(loja.kind, Kind::Entry);
+        assert_eq!(loja.entry_reason.as_deref(), Some("plugin do WordPress"));
+        assert_eq!(loja.hooks, vec!["init".to_string(), "loja_pronto".to_string(), "the_content".to_string()]);
+        assert_eq!(get(&m, "wp-content/mu-plugins/cedo.php").entry_reason.as_deref(), Some("mu-plugin do WordPress"));
+        assert_eq!(get(&m, "wp-content/themes/tema/functions.php").entry_reason.as_deref(), Some("tema do WordPress"));
+
+        // Callback em texto liga o plugin ao arquivo que declara a função.
+        let boot = get(&m, "wp-content/plugins/loja/includes/boot.php");
+        assert_eq!(boot.kind, Kind::Normal);
+        assert!(boot.used_by.contains(&Link { path: "wp-content/plugins/loja/loja.php".into(), via: "hook".into() }), "{:?}", boot.used_by);
+        // Quem dispara o hook também liga ao dono do callback.
+        assert!(boot.used_by.contains(&Link { path: "wp-includes/plugin.php".into(), via: "hook".into() }), "{:?}", boot.used_by);
+
+        // Callback em array com classe.
+        let filtros = get(&m, "wp-content/plugins/loja/includes/Filtros.php");
+        assert_eq!(filtros.kind, Kind::Normal);
+        assert!(filtros.used_by.contains(&Link { path: "wp-content/plugins/loja/loja.php".into(), via: "hook".into() }));
+        let assets = get(&m, "wp-content/themes/tema/inc/Assets.php");
+        assert_eq!(assets.kind, Kind::Normal);
+        assert!(assets.used_by.contains(&Link { path: "wp-content/themes/tema/functions.php".into(), via: "hook".into() }));
+
+        // Arquivo de verdade sem uso continua órfão, e a nota explica o que foi seguido.
+        assert_eq!(get(&m, "wp-content/plugins/loja/includes/sem-uso.php").kind, Kind::Orphan);
+        assert!(m.notes.iter().any(|n| n.contains("WordPress")), "{:?}", m.notes);
+        let _ = fs::remove_dir_all(&root);
     }
 }
 
