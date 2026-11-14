@@ -3,10 +3,10 @@
 import { mockIPC } from "@tauri-apps/api/mocks";
 
 const projects = [
-  { id: "loja-virtual", name: "Loja Virtual", docroot: "public", phpVersion: "8.3.32", dbVersion: "8.4.13", dbInitialized: true, httpPort: 8000, dbPort: 3307, dbName: "loja_virtual", dbUser: "root", dbPassword: "root", url: "http://loja-virtual.localhost:8000", httpUrl: "http://loja-virtual.localhost:8000", https: false, httpsPort: 0, lan: false, lanUrls: [] as string[], path: "/Users/dev/LocalTusk/projects/loja-virtual", running: true, busy: false, hasAdminneo: true, hasMailpit: true, hasWordpress: false, docrootInUse: true, dbEngine: "mysql", redis: false, redisPort: 0 },
-  { id: "blog-wp", name: "Blog WordPress", docroot: "", phpVersion: "8.4.9", dbVersion: "8.4.13", dbInitialized: true, httpPort: 8001, dbPort: 3308, dbName: "blog_wp", dbUser: "root", dbPassword: "root", url: "http://blog-wp.localhost:8001", httpUrl: "http://blog-wp.localhost:8001", https: false, httpsPort: 0, lan: false, lanUrls: [] as string[], path: "/Users/dev/LocalTusk/projects/blog-wp", running: true, busy: false, hasAdminneo: true, hasMailpit: true, hasWordpress: true, docrootInUse: true, dbEngine: "mysql", redis: false, redisPort: 0 },
-  { id: "api-legada", name: "API Legada", docroot: "", phpVersion: "8.1.33", dbVersion: "", dbInitialized: false, httpPort: 8002, dbPort: 3309, dbName: "api_legada", dbUser: "root", dbPassword: "root", url: "http://api-legada.localhost:8002", httpUrl: "http://api-legada.localhost:8002", https: false, httpsPort: 0, lan: false, lanUrls: [] as string[], path: "/Users/dev/LocalTusk/projects/api-legada", running: false, busy: false, hasAdminneo: false, hasMailpit: false, hasWordpress: false, docrootInUse: false, dbEngine: "mysql", redis: false, redisPort: 0 },
-  { id: "api-pg", name: "API PostgreSQL", docroot: "public", phpVersion: "8.3.32", dbEngine: "postgres", dbVersion: "17.12.0", dbInitialized: true, httpPort: 8003, dbPort: 5433, dbName: "api_pg", dbUser: "root", dbPassword: "root", url: "http://api-pg.localhost:8003", httpUrl: "http://api-pg.localhost:8003", https: false, httpsPort: 0, lan: false, lanUrls: [] as string[], path: "/Users/dev/LocalTusk/projects/api-pg", running: true, busy: false, hasAdminneo: true, hasMailpit: true, hasWordpress: false, docrootInUse: true, redis: true, redisPort: 6380 },
+  { id: "loja-virtual", name: "Loja Virtual", docroot: "public", phpVersion: "8.3.32", dbVersion: "8.4.13", dbInitialized: true, httpPort: 8000, dbPort: 3307, dbName: "loja_virtual", dbUser: "root", dbPassword: "root", url: "http://loja-virtual.localhost:8000", httpUrl: "http://loja-virtual.localhost:8000", https: false, httpsPort: 0, lan: false, lanUrls: [] as string[], path: "/Users/dev/LocalTusk/projects/loja-virtual", running: true, busy: false, hasAdminneo: true, hasMailpit: true, hasWordpress: false, docrootInUse: true, dbEngine: "mysql", redis: false, redisPort: 0, autoLogin: false, autoLoginUser: "" },
+  { id: "blog-wp", name: "Blog WordPress", docroot: "", phpVersion: "8.4.9", dbVersion: "8.4.13", dbInitialized: true, httpPort: 8001, dbPort: 3308, dbName: "blog_wp", dbUser: "root", dbPassword: "root", url: "http://blog-wp.localhost:8001", httpUrl: "http://blog-wp.localhost:8001", https: false, httpsPort: 0, lan: false, lanUrls: [] as string[], path: "/Users/dev/LocalTusk/projects/blog-wp", running: true, busy: false, hasAdminneo: true, hasMailpit: true, hasWordpress: true, docrootInUse: true, dbEngine: "mysql", redis: false, redisPort: 0, autoLogin: false, autoLoginUser: "" },
+  { id: "api-legada", name: "API Legada", docroot: "", phpVersion: "8.1.33", dbVersion: "", dbInitialized: false, httpPort: 8002, dbPort: 3309, dbName: "api_legada", dbUser: "root", dbPassword: "root", url: "http://api-legada.localhost:8002", httpUrl: "http://api-legada.localhost:8002", https: false, httpsPort: 0, lan: false, lanUrls: [] as string[], path: "/Users/dev/LocalTusk/projects/api-legada", running: false, busy: false, hasAdminneo: false, hasMailpit: false, hasWordpress: false, docrootInUse: false, dbEngine: "mysql", redis: false, redisPort: 0, autoLogin: false, autoLoginUser: "" },
+  { id: "api-pg", name: "API PostgreSQL", docroot: "public", phpVersion: "8.3.32", dbEngine: "postgres", dbVersion: "17.12.0", dbInitialized: true, httpPort: 8003, dbPort: 5433, dbName: "api_pg", dbUser: "root", dbPassword: "root", url: "http://api-pg.localhost:8003", httpUrl: "http://api-pg.localhost:8003", https: false, httpsPort: 0, lan: false, lanUrls: [] as string[], path: "/Users/dev/LocalTusk/projects/api-pg", running: true, busy: false, hasAdminneo: true, hasMailpit: true, hasWordpress: false, docrootInUse: true, redis: true, redisPort: 6380, autoLogin: false, autoLoginUser: "" },
 ];
 
 let sslTrusted = false;
@@ -37,6 +37,12 @@ const backups = [
 const blueprints = [
   { fileName: "landing-page.tar.gz", path: "/Users/dev/LocalTusk/blueprints/landing-page.tar.gz", name: "Landing page", description: "Base com formulário de contato e e-mail pelo Mailpit.", size: 3_400_000, createdAt: 1794486600, sourceName: "Landing Teste", phpVersion: "8.3.32", dbVersion: "8.4.13", docroot: "public", hasWordpress: false },
   { fileName: "wordpress-limpo.tar.gz", path: "/Users/dev/LocalTusk/blueprints/wordpress-limpo.tar.gz", name: "WordPress limpo", description: "", size: 61_800_000, createdAt: 1794400000, sourceName: "Blog WordPress", phpVersion: "8.1.33", dbVersion: "8.4.13", docroot: "", hasWordpress: true },
+];
+
+const localSites = [
+  { id: "aaa111", name: "Padaria do Zé", path: "/home/dev/Local Sites/padaria", domain: "padaria.local", phpVersion: "8.2.29", mysqlVersion: "8.0.35", webServer: "nginx", multisite: false, running: false, dumpSavedAt: 1794486600, dumpStale: false, blocker: null, warnings: [] as string[] },
+  { id: "bbb222", name: "Clínica Sorriso", path: "/home/dev/Local Sites/clinica", domain: "clinica.local", phpVersion: "8.3.32", mysqlVersion: "8.4.13", webServer: "nginx", multisite: false, running: true, dumpSavedAt: 1794400000, dumpStale: false, blocker: "Pare o site no Local para importar (se o Local estiver fechado, abra-o e pare o site).", warnings: [] as string[] },
+  { id: "ccc333", name: "Rede de Blogs", path: "/home/dev/Local Sites/blogs", domain: "blogs.local", phpVersion: "8.1.33", mysqlVersion: "8.4.0", webServer: "apache", multisite: true, running: false, dumpSavedAt: 1794300000, dumpStale: true, blocker: null, warnings: ["Sites multisite podem precisar de ajustes manuais.", "Regras do .htaccess não são usadas pelo LocalTusk.", "O banco salvo pelo Local pode estar desatualizado. Inicie e pare o site no Local para garantir."] },
 ];
 
 const captured = [
@@ -131,6 +137,24 @@ export function installDevMock() {
           return bp;
         }
         case "create_project_from_blueprint": return { project: projects[0], warning: "O blueprint foi feito com PHP 8.1.33, que não está instalado aqui. O projeto usa as versões mais recentes instaladas." };
+        case "list_local_sites":
+          // Com "?semlocal" na URL, simula o Local não instalado.
+          return new URLSearchParams(location.search).has("semlocal") ? Promise.reject("Nenhuma instalação do Local encontrada neste computador.") : later(localSites);
+        case "check_local_site": {
+          const s = localSites.find((x) => x.id === a.id)!;
+          const missingPhp = s.phpVersion.startsWith("8.2");
+          return later({
+            php: missingPhp
+              ? { wanted: "8.2", installed: false, installVersion: "8.2.30", fallback: "8.3", fallbackOlder: false }
+              : { wanted: s.phpVersion.split(".").slice(0, 2).join("."), installed: true, installVersion: null, fallback: null, fallbackOlder: false },
+            mysql: s.mysqlVersion.startsWith("8.0")
+              ? { wanted: "8.0", installed: false, installVersion: "8.0.46", fallback: "8.4", fallbackOlder: false }
+              : { wanted: "8.4", installed: true, installVersion: null, fallback: null, fallbackOlder: false },
+          });
+        }
+        case "import_local_site": return new Promise((resolve) => setTimeout(() => resolve({ project: projects[0], warning: "Pastas ligadas por link foram copiadas como pastas comuns: wp-content/uploads." }), 800));
+        case "install_php":
+        case "install_mysql": return new Promise((resolve) => setTimeout(() => resolve(null), 1200));
         case "delete_blueprint": {
           const i = blueprints.findIndex((b) => b.path === a.path);
           if (i >= 0) blueprints.splice(i, 1);
@@ -162,6 +186,14 @@ export function installDevMock() {
           p.lanUrls = p.lan ? lanUrlsFor(p) : [];
           return later(p);
         }
+        case "set_auto_login": {
+          const p = projects.find((x) => x.id === a.id)!;
+          p.autoLogin = a.enabled as boolean;
+          p.autoLoginUser = a.user as string;
+          return later(p);
+        }
+        case "list_wp_admins": return later(["admin", "editor-chefe"]);
+        case "open_wp_admin": return null;
         case "set_lan": {
           const p = projects.find((x) => x.id === a.id)!;
           p.lan = a.enabled as boolean;

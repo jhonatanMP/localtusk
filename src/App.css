@@ -151,6 +151,7 @@ button:disabled, select:disabled, input:disabled { cursor: default; }
 .muted { color: var(--muted); }
 .small { font-size: 12px; }
 .err-text { color: var(--red); }
+.warn-text { color: var(--amber); }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .row.nowrap { flex-wrap: nowrap; }
 .row.center { justify-content: center; }

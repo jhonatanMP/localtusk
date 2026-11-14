@@ -30,6 +30,7 @@ Cada projeto roda com processos nativos isolados: **Caddy** (web) + **PHP-FPM** 
 - [x] Download do MySQL e do PostgreSQL no macOS, no Linux e no Windows
 - [x] Backup e restauração de projetos (arquivos + banco) em `~/LocalTusk/backups`
 - [x] **Blueprints**: salve um projeto (arquivos, banco e versões de PHP/MySQL) como modelo em `~/LocalTusk/blueprints` e crie novos projetos já prontos a partir dele; dá para compartilhar o blueprint como arquivo e importar o de outra pessoa
+- [x] **Importar do Local**: lê os sites do [Local](https://localwp.com) (Linux e macOS; só leitura, nada na pasta dele é alterado) e cria um projeto do LocalTusk com os arquivos de `app/public` (links simbólicos viram cópias) e o banco salvo em `app/sql/local.sql`, com `siteurl`/`home` trocados para o endereço novo. O site precisa estar parado no Local; se faltar a versão do PHP ou do MySQL, o app oferece instalar ou usar a mais próxima
 - [x] Aba **API**: inspetor que mostra cada requisição recebida pelo projeto (cabeçalhos, corpo, formulário/arquivos, resposta, tempo; copiar como cURL e reenviar) e um cliente de API (métodos, cabeçalhos, corpo JSON/form/texto, redirecionamentos, histórico) com **coleção** de requisições salvas por projeto (`collection.json`), exportável e importável (também dá para salvar direto do inspetor), com layout que se adapta à largura da janela
 - [x] Aba **Mapa**: lê os arquivos PHP do projeto (sem executar nada), segue `require`/`include` e classes ligadas por `use`, `new`, `extends` e afins, e mostra quem chama quem em **lista** e em **grafo** (React Flow), com os arquivos que nenhum outro usa marcados como possíveis órfãos. A leitura é estática: não enxerga hooks do WordPress, rotas nem `require` com variável, então o resultado é uma pista, não uma ordem para apagar
 - [x] **Aviso de versão nova**: o app lê a última versão publicada no GitHub (ao abrir e a cada 6 horas) e mostra um banner com "Baixar" (no macOS, o `.dmg` da sua arquitetura), "Novidades" e "Agora não". Em "PHP e ferramentas" dá para verificar na hora ou desligar o aviso; desligado, o app não faz essa consulta. Não instala nada sozinho
@@ -87,6 +88,7 @@ cargo test --lib extras_end_to_end -- --ignored --nocapture
 cargo test --lib managed_stack -- --ignored --nocapture   # Caddy + MySQL + PHP, tudo baixado
 cargo test --lib postgres_redis_end_to_end -- --ignored --nocapture   # PostgreSQL + Valkey + PHP (baixa ~250 MB e compila o Valkey; cache em /tmp/localtusk-test-pgredis)
 cargo test --lib wordpress_end_to_end -- --ignored --nocapture   # WP-CLI + WordPress de verdade (cache em /tmp/localtusk-test-wp)
+cargo test --lib local_folder_restore_end_to_end -- --ignored --nocapture   # importar de uma pasta "do Local" (reaproveita o cache de /tmp/localtusk-test-wp)
 ```
 
 ## Estrutura
