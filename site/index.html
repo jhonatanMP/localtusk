@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>LocalTusk — ambiente PHP local grátis, sem Docker</title>
-  <meta name="description" content="O melhor ambiente para desenvolver em PHP no macOS e no Linux: Caddy, PHP-FPM, MySQL ou PostgreSQL e Redis nativos, Adminer Neo, Mailpit, WP-CLI, inspetor de API, mapa de arquivos e backups. Gratuito e open source (MIT).">
+  <meta name="description" content="O melhor ambiente para desenvolver em PHP no macOS, no Linux e no Windows: Caddy, PHP-FPM, MySQL ou PostgreSQL e Redis nativos, Adminer Neo, Mailpit, WP-CLI, inspetor de API, mapa de arquivos, importação de sites do Local e backups. Gratuito e open source (MIT).">
   <link rel="canonical" href="https://jhonatanmp.github.io/localtusk/">
   <meta name="robots" content="index, follow, max-image-preview:large">
   <meta name="theme-color" content="#0d0e15">
@@ -14,7 +14,7 @@
   <meta property="og:site_name" content="LocalTusk">
   <meta property="og:locale" content="pt_BR">
   <meta property="og:title" content="LocalTusk — o melhor ambiente para desenvolver em PHP">
-  <meta property="og:description" content="Caddy, PHP-FPM, MySQL ou PostgreSQL e Redis nativos, sem Docker. Adminer Neo, Mailpit, WP-CLI, inspetor de API, mapa de arquivos, backups e blueprints. Gratuito e open source.">
+  <meta property="og:description" content="Caddy, PHP-FPM, MySQL ou PostgreSQL e Redis nativos, sem Docker. Adminer Neo, Mailpit, WP-CLI, inspetor de API, mapa de arquivos, importação de sites do Local, backups e blueprints. Gratuito e open source.">
   <meta property="og:url" content="https://jhonatanmp.github.io/localtusk/">
   <meta property="og:image" content="https://jhonatanmp.github.io/localtusk/assets/img/og.png">
   <meta property="og:image:width" content="1200">
@@ -48,7 +48,7 @@
         "@type": "SoftwareApplication",
         "@id": "https://jhonatanmp.github.io/localtusk/#app",
         "name": "LocalTusk",
-        "description": "Ambiente de desenvolvimento PHP local para macOS e Linux, sem Docker, com Caddy, PHP-FPM, MySQL ou PostgreSQL e Redis nativos, Adminer Neo, Mailpit, WP-CLI, inspetor de API, mapa de arquivos do projeto, backups e blueprints.",
+        "description": "Ambiente de desenvolvimento PHP local para macOS, Linux e Windows, sem Docker, com Caddy, PHP-FPM, MySQL ou PostgreSQL e Redis nativos, Adminer Neo, Mailpit, WP-CLI, inspetor de API, mapa de arquivos do projeto, importação de sites do Local, backups e blueprints.",
         "applicationCategory": "DeveloperApplication",
         "operatingSystem": "macOS, Linux",
         "inLanguage": "pt-BR",
@@ -172,7 +172,7 @@
 
           <article class="card c-4" data-reveal id="mapa">
             <span class="icon-chip"><svg class="ico"><use href="assets/img/icons.svg#i-graph"/></svg></span>
-            <h3>Mapa do projeto <span class="badge-new">Novo</span></h3>
+            <h3>Mapa do projeto</h3>
             <p>Veja quem chama quem. O app lê os arquivos PHP do projeto, segue os <code class="mono">require</code> e <code class="mono">include</code> e as classes ligadas por <code class="mono">use</code>, <code class="mono">new</code> e <code class="mono">extends</code>, e desenha tudo num grafo. Arquivos que nenhum outro usa aparecem como possíveis órfãos, e dá para clicar em qualquer um e ver o que ele chama e quem o chama.</p>
             <div class="tags"><span>PHP puro</span><span>Composer</span><span>Lista e grafo</span><span>Sem rodar o código</span></div>
             <div class="card-shot">
@@ -197,6 +197,20 @@
             <span class="icon-chip"><svg class="ico"><use href="assets/img/icons.svg#i-package"/></svg></span>
             <h3>WordPress em um clique</h3>
             <p>Baixa o WordPress, cria o <code class="mono">wp-config.php</code> com o banco do projeto e deixa o site pronto para usar. O WP-CLI é integrado.</p>
+          </article>
+
+          <article class="card c-3" data-reveal>
+            <span class="icon-chip"><svg class="ico"><use href="assets/img/icons.svg#i-download"/></svg></span>
+            <h3>Importar sites do Local <span class="badge-new">Novo</span></h3>
+            <p>Usa o Local (LocalWP)? Em <b>Novo projeto → Importar do Local</b>, o app lista os sites que estão no seu computador e traz o escolhido para cá: copia os arquivos, importa o banco, troca as URLs e os caminhos antigos pelos do projeto novo. As pastas do Local não são tocadas — ele só lê e copia. Se faltar a versão de PHP ou MySQL do site, o app oferece instalar ou usar a mais próxima.</p>
+            <div class="tags"><span>macOS e Linux</span><span>Arquivos e banco</span><span>URLs ajustadas</span></div>
+          </article>
+
+          <article class="card c-3" data-reveal>
+            <span class="icon-chip"><svg class="ico"><use href="assets/img/icons.svg#i-shield"/></svg></span>
+            <h3>Login automático no wp-admin <span class="badge-new">Novo</span></h3>
+            <p>Com a opção ligada, o botão do wp-admin já entra logado, sem digitar senha. O app gera um código de uso único que vale por 60 segundos (só o hash dele fica gravado no banco) e que só serve para administradores. Dá para escolher qual administrador usar e desligar quando quiser — ao desligar, o plugin de login é removido do site.</p>
+            <div class="tags"><span>Uso único</span><span>Vale 60 s</span><span>Só administradores</span></div>
           </article>
 
           <article class="card c-2" data-reveal>
@@ -311,6 +325,7 @@
             <button class="tab" role="tab" id="tab-3" aria-selected="false" aria-controls="panel-3" tabindex="-1" type="button">PHP e ferramentas</button>
             <button class="tab" role="tab" id="tab-4" aria-selected="false" aria-controls="panel-4" tabindex="-1" type="button">Blueprints</button>
             <button class="tab" role="tab" id="tab-5" aria-selected="false" aria-controls="panel-5" tabindex="-1" type="button">Mapa</button>
+            <button class="tab" role="tab" id="tab-6" aria-selected="false" aria-controls="panel-6" tabindex="-1" type="button">Importar</button>
           </div>
           <div class="tab-panels">
             <div class="tab-panel" role="tabpanel" id="panel-1" aria-labelledby="tab-1">
@@ -332,6 +347,10 @@
             <div class="tab-panel" role="tabpanel" id="panel-5" aria-labelledby="tab-5" hidden>
               <div class="window"><div class="shot"><img src="assets/img/app-mapa-lista.webp" width="1600" height="1044" loading="lazy" decoding="async" alt="Aba Mapa em modo lista, com os arquivos PHP do projeto, o tipo de cada um (entrada, em uso, sem uso) e o detalhe de um arquivo que nenhum outro chama."></div></div>
               <p class="tab-caption">A lista mostra quais arquivos ninguém usa e o que cada um chama. O grafo desenha as mesmas ligações.</p>
+            </div>
+            <div class="tab-panel" role="tabpanel" id="panel-6" aria-labelledby="tab-6" hidden>
+              <div class="window"><div class="shot"><img src="assets/img/app-importar-local.webp" width="1600" height="1000" loading="lazy" decoding="async" alt="Tela Importar do Local com três sites do LocalWP: Padaria do Zé, Clínica Sorriso (com o aviso para parar o site no Local) e Rede de Blogs (com avisos de multisite e banco desatualizado), cada um com versões de PHP e MySQL e o botão Importar."></div></div>
+              <p class="tab-caption">Quem vem do Local (LocalWP) traz os sites com arquivos, banco e URLs ajustadas. As pastas do Local não são alteradas.</p>
             </div>
           </div>
         </div>
@@ -436,6 +455,7 @@
           <h3><svg class="ico"><use href="assets/img/icons.svg#i-alert"/></svg> O que o LocalTusk ainda não tem</h3>
           <ul>
             <li>Windows e Linux são beta: a pilha completa passa nos testes automáticos (no Windows, com runners do GitHub; no Linux, no Ubuntu 24.04 ARM64), mas ainda tem poucas horas de uso real, e o HTTPS precisa ter o certificado instalado à mão. No Windows o Redis é o build comunitário do projeto redis-windows, não um binário oficial.</li>
+            <li>Importar sites do Local por enquanto só funciona no macOS e no Linux: no Windows o Local guarda os dados em outro formato.</li>
             <li>Outras linguagens e bancos: por enquanto o app cobre PHP 8.x com MySQL ou PostgreSQL e Redis (MongoDB e outros ficam de fora). O WordPress só funciona em projetos MySQL.</li>
             <li>Mapa do projeto: a leitura é estática e feita para PHP puro e Composer. Ela não enxerga hooks do WordPress, rotas, nomes de classe montados em variável nem <code>require</code> com variável, então um arquivo carregado assim pode aparecer como órfão por engano. Use o resultado como pista, não como ordem para apagar.</li>
             <li>Anos de estrada: é um projeto novo, com comunidade pequena.</li>
@@ -510,11 +530,19 @@ Software…</div>
           </details>
           <details>
             <summary>Quais versões de PHP e de banco posso usar? <svg class="ico"><use href="assets/img/icons.svg#i-chevron"/></svg></summary>
-            <div class="answer">Qualquer versão do PHP 8.x, instalada pelo app com binários estáticos, MySQL 8.0, 8.4 LTS e 9.x ou PostgreSQL 14 a 18. O Redis é o Valkey 9, que o app compila na sua máquina (exige as ferramentas de linha de comando do Xcode).</div>
+            <div class="answer">Qualquer versão do PHP 8.x, instalada pelo app com binários estáticos, MySQL 8.0, 8.4 LTS e 9.x ou PostgreSQL 14 a 18. O Redis é o Valkey, compatível com o Redis (no Windows, o app usa o build comunitário do projeto redis-windows).</div>
           </details>
           <details>
             <summary>O que o Mapa do projeto mostra? <svg class="ico"><use href="assets/img/icons.svg#i-chevron"/></svg></summary>
             <div class="answer">É uma aba que lê os arquivos PHP do projeto, sem executar nada, e mostra quais arquivos chamam quais, em lista ou em grafo. Serve para entender um projeto herdado e para achar arquivos que nenhum outro usa. A leitura segue <code>require</code>, <code>include</code> e classes ligadas por <code>use</code>, <code>new</code> e <code>extends</code>. O que é chamado por variável, hook ou rota não aparece, então trate os órfãos como pistas.</div>
+          </details>
+          <details>
+            <summary>Uso o Local (LocalWP). Consigo trazer meus sites? <svg class="ico"><use href="assets/img/icons.svg#i-chevron"/></svg></summary>
+            <div class="answer">Sim, no macOS e no Linux. Em <b>Novo projeto</b>, escolha <b>Importar do Local</b>: o app lista os sites do Local que estão no computador e importa o escolhido para um projeto novo, com os arquivos, o banco e as URLs já trocadas para o endereço daqui. Nada é alterado nas pastas do Local. O site precisa estar parado no Local, e a importação usa o banco que o Local salva ao parar o site — se ele estiver desatualizado, o app avisa. No Windows o Local guarda os dados em outro formato, então a importação ainda não funciona lá.</div>
+          </details>
+          <details>
+            <summary>Como funciona o login automático no wp-admin? <svg class="ico"><use href="assets/img/icons.svg#i-chevron"/></svg></summary>
+            <div class="answer">É uma opção por projeto (fica na área do WordPress). Ligada, o botão <b>wp-admin</b> abre o painel já logado: o app cria um código aleatório de uso único, guarda só o hash dele no banco do site por 60 segundos e abre o endereço com esse código; um plugin mínimo (mu-plugin) troca o código pela sessão do administrador escolhido e apaga o código. Sem o código, nada muda: o login continua pedindo usuário e senha como sempre. Ao desligar a opção, o app remove o plugin do site.</div>
           </details>
           <details>
             <summary>Onde ficam os meus dados? <svg class="ico"><use href="assets/img/icons.svg#i-chevron"/></svg></summary>
