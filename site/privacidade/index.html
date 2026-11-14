@@ -92,7 +92,7 @@
         <p>Como o código é aberto, você pode conferir tudo isso no <a href="https://github.com/jhonatanMP/localtusk" rel="noopener">repositório</a>.</p>
 
         <h2 id="rede">Quando o app usa a internet</h2>
-        <p>O app só acessa a rede para baixar os componentes que você pede para instalar, e consulta a versão mais recente de alguns deles. Isso acontece direto entre o seu computador e as fontes abaixo, sem passar por servidores do LocalTusk.</p>
+        <p>O app só acessa a rede para baixar os componentes que você pede para instalar, e consulta a versão mais recente de alguns deles e a do próprio LocalTusk (para avisar quando há versão nova; dá para desligar em “PHP e ferramentas”). Isso acontece direto entre o seu computador e as fontes abaixo, sem passar por servidores do LocalTusk.</p>
         <div class="table-scroll">
           <table class="simple-table">
             <caption class="sr">Servidores que o app contata e para quê</caption>
@@ -101,6 +101,7 @@
               <tr><td>PHP</td><td><code>dl.static-php.dev</code></td></tr>
               <tr><td>MySQL</td><td><code>cdn.mysql.com</code></td></tr>
               <tr><td>PostgreSQL e Valkey (Redis)</td><td><code>github.com</code> (binários do PostgreSQL e código-fonte do Valkey, que o app compila aqui)</td></tr>
+              <tr><td>Aviso de versão nova do LocalTusk</td><td><code>api.github.com</code> (só lê o número da última versão publicada; pode ser desligado no app)</td></tr>
               <tr><td>Caddy, Mailpit e WP-CLI</td><td><code>api.github.com</code> e <code>github.com</code></td></tr>
               <tr><td>Adminer Neo</td><td><code>www.adminneo.org</code></td></tr>
               <tr><td>WordPress (quando você cria um site)</td><td><code>wordpress.org</code>, pelo WP-CLI</td></tr>

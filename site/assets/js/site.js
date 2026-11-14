@@ -84,7 +84,7 @@
   /* ------------------------------------------------------------ Download */
   const RELEASES_URL = `https://github.com/${REPO}/releases`;
   const OS_NAME = { macos: "macOS", windows: "Windows", linux: "Linux" };
-  const ARCH_NAME = { macos: { arm64: "Apple Silicon", x64: "Intel" }, linux: { arm64: "ARM64", x64: "x86_64" } };
+  const ARCH_NAME = { macos: { arm64: "Apple Silicon", x64: "Intel" }, linux: { arm64: "ARM64", x64: "x86_64" }, windows: { arm64: "ARM64", x64: "x64" } };
   const fmtSize = (b) => (b > 1e6 ? (b / 1e6).toFixed(1).replace(".", ",") + " MB" : Math.max(1, Math.round(b / 1e3)) + " KB");
 
   /** Sistema do visitante: "macos", "linux", "windows" ou "" (celular, tablet ou desconhecido). */
@@ -166,7 +166,7 @@
 
   /** O arquivo recomendado para este visitante (dmg no Mac, AppImage no Linux). */
   function pickAsset(release, os, arch) {
-    const kind = os === "macos" ? "dmg" : os === "linux" ? "appimage" : "";
+    const kind = os === "macos" ? "dmg" : os === "linux" ? "appimage" : os === "windows" ? "installer" : "";
     if (!release || !kind) return null;
     return release.assets.find((a) => a.info && a.info.os === os && a.info.kind === kind && a.info.arch === arch) || null;
   }
@@ -176,7 +176,7 @@
     const ctas = $$("[data-cta]");
     if (!ctas.length) return;
     const os = detectOS();
-    const supported = os === "macos" || os === "linux";
+    const supported = os === "macos" || os === "linux" || os === "windows";
     ctas.forEach((el) => {
       const label = $("[data-cta-label]", el);
       if (label) label.textContent = supported ? `Baixar para ${OS_NAME[os]}` : "Baixar o LocalTusk";
@@ -221,7 +221,7 @@
     // Dentro do cartão do sistema, o arquivo da arquitetura do visitante vira o botão principal.
     $$(".os-card.rec [data-asset]").forEach((a) => {
       const [, assetArch, kind] = a.dataset.asset.split("-");
-      const primary = assetArch === arch && (kind === "dmg" || kind === "appimage");
+      const primary = assetArch === arch && (kind === "dmg" || kind === "appimage" || kind === "installer");
       a.classList.toggle("btn-primary", primary);
       a.classList.toggle("btn-ghost", !primary);
     });

@@ -521,12 +521,19 @@ mod tests {
     fn cliente_recusa_entradas_invalidas_e_explica_conexao_recusada() {
         assert!(send(&request("GE T", "http://x".into())).is_err());
         assert!(send(&request("GET", "ftp://x".into())).is_err());
-        // Porta fechada.
-        let port = {
-            let l = TcpListener::bind("127.0.0.1:0").unwrap();
-            l.local_addr().unwrap().port()
-        };
-        let err = send(&request("GET", format!("http://127.0.0.1:{port}/"))).unwrap_err();
+        // Porta fechada. A porta recém-liberada pode ser reaproveitada por outro teste
+        // em paralelo (já aconteceu no Windows); tenta algumas até uma recusar de fato.
+        let mut err = String::new();
+        for _ in 0..5 {
+            let port = {
+                let l = TcpListener::bind("127.0.0.1:0").unwrap();
+                l.local_addr().unwrap().port()
+            };
+            err = send(&request("GET", format!("http://127.0.0.1:{port}/"))).unwrap_err();
+            if err.contains("Conexão recusada") {
+                break;
+            }
+        }
         assert!(err.contains("Conexão recusada"), "{err}");
     }
 }

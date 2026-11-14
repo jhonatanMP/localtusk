@@ -10,6 +10,7 @@ name: Release
 # Arquivos publicados (os nomes são o que a página de download do site procura):
 #   macOS    LocalTusk_<v>_aarch64.dmg (Apple Silicon) e LocalTusk_<v>_x64.dmg (Intel)
 #   Linux    LocalTusk_<v>_amd64.AppImage / .deb / .rpm  e as versões arm64/aarch64
+#   Windows  LocalTusk_<v>_x64-setup.exe (NSIS, x64)
 #
 # Os apps não são assinados pela Apple (macOS) nem por uma autoridade (Linux): o macOS pede
 # "Abrir" com o botão direito na primeira vez. O build do macOS usa assinatura "ad-hoc"
@@ -74,6 +75,9 @@ jobs:
           - name: Linux (ARM64)
             os: ubuntu-24.04-arm
             bundles: appimage,deb,rpm
+          - name: Windows (x64)
+            os: windows-latest
+            bundles: nsis
 
     steps:
       - uses: actions/checkout@v4
@@ -127,6 +131,7 @@ jobs:
 
             - **macOS**: baixe o `.dmg` do seu Mac (`aarch64` é Apple Silicon, `x64` é Intel). O app não é assinado pela Apple: na primeira abertura, clique com o botão direito no app e escolha **Abrir** (ou rode `xattr -cr /Applications/LocalTusk.app`).
             - **Linux**: `.AppImage` (qualquer distribuição: `chmod +x` e abra), `.deb` (Ubuntu e Debian) ou `.rpm` (Fedora e openSUSE). O app baixa o resto sozinho; o MySQL pede `libaio` e `libnuma`, e o Redis (Valkey) pede `make` e `gcc`.
+            - **Windows**: baixe o `LocalTusk_<versão>_x64-setup.exe` e rode o instalador. O app não é assinado: o Windows pode mostrar o aviso do SmartScreen — clique em "Mais informações" e "Executar assim mesmo". Beta: a pilha é testada automaticamente, mas ainda tem poucas horas de uso real.
 
             Veja as novidades e as instruções completas em https://jhonatanmp.github.io/localtusk/baixar/
           releaseDraft: false

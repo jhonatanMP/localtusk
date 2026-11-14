@@ -32,6 +32,7 @@ pub fn php_root(base: &Path) -> PathBuf {
     base.join("bin").join("php")
 }
 
+#[allow(unreachable_code)]
 pub fn install_dir(base: &Path, version: &str) -> PathBuf {
     php_root(base).join(version)
 }
@@ -61,8 +62,184 @@ pub struct PhpRelease {
     pub latest: bool,
 }
 
+
+// ------------------------------------------------------------------ Windows
+//
+// O PHP oficial do Windows (windows.php.net) não tem PHP-FPM: quem atende o FastCGI é o
+// `php-cgi.exe`. Guardamos uma cópia dele como `php-fpm.exe` para o resto do app usar o
+// mesmo nome nos três sistemas. O pacote é único para MySQL e PostgreSQL (as extensões
+// `php_pgsql.dll`/`php_pdo_pgsql.dll` vêm nele), então não há pacote "common" no Windows.
+
+#[cfg(windows)]
+const WIN_RELEASES: &str = "https://windows.php.net/downloads/releases";
+#[cfg(windows)]
+const WIN_ARCHIVES: &str = "https://windows.php.net/downloads/releases/archives";
+
+/// Compilador do pacote oficial para a série: VS17 no 8.4/8.5, VS16 do 8.0 ao 8.3.
+#[cfg(windows)]
+fn win_compiler(version: &str) -> Option<&'static str> {
+    match version.split('.').take(2).collect::<Vec<_>>().join(".").as_str() {
+        "8.5" | "8.4" => Some("vs17"),
+        "8.3" | "8.2" | "8.1" | "8.0" => Some("vs16"),
+        _ => None,
+    }
+}
+
+#[cfg(windows)]
+fn win_file(version: &str) -> Option<String> {
+    Some(format!("php-{version}-nts-Win32-{}-x64.zip", win_compiler(version)?))
+}
+
+#[cfg(windows)]
+fn win_urls(version: &str) -> Vec<String> {
+    let Some(file) = win_file(version) else { return vec![] };
+    vec![format!("{WIN_RELEASES}/{file}"), format!("{WIN_ARCHIVES}/{file}")]
+}
+
+/// Lê a listagem de arquivos antigos do windows.php.net e monta o catálogo (x64, NTS).
+#[cfg(windows)]
+fn parse_win_catalog(html: &str, installed: &[String]) -> Vec<PhpRelease> {
+    let re = regex::Regex::new(r"php-(\d+\.\d+\.\d+)-nts-Win32-vs\d+-x64\.zip").unwrap();
+    let mut versions: Vec<String> = re
+        .captures_iter(html)
+        .filter_map(|c| {
+            let v = c[1].to_string();
+            (valid_version(&v) && win_compiler(&v).is_some()).then_some(v)
+        })
+        .collect();
+    versions.sort_by(|a, b| version_key(b).cmp(&version_key(a)));
+    versions.dedup();
+    let mut seen = std::collections::HashSet::new();
+    versions
+        .into_iter()
+        .map(|version| {
+            let minor = version.split('.').take(2).collect::<Vec<_>>().join(".");
+            PhpRelease {
+                installed: installed.iter().any(|i| i == &version),
+                latest: seen.insert(minor.clone()),
+                minor,
+                size: String::new(),
+                version,
+            }
+        })
+        .collect()
+}
+
+#[cfg(windows)]
+fn catalog_win(base: &Path) -> Result<Vec<PhpRelease>, String> {
+    let body = download::get_string(&format!("{WIN_ARCHIVES}/"))
+        .map_err(|e| format!("Não foi possível consultar as versões do PHP (sem internet?): {e}"))?;
+    let installed: Vec<String> = fs::read_dir(php_root(base))
+        .map(|rd| {
+            rd.flatten()
+                .filter(|e| crate::platform::bin(&e.path(), "php-fpm").is_file())
+                .map(|e| e.file_name().to_string_lossy().to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(parse_win_catalog(&body, &installed))
+}
+
+
+/// Baixa uma extensão do PECL para Windows (`php_redis.dll`, `php_igbinary.dll`) e a
+/// coloca no `ext/` do pacote. Melhor esforço: sem ela o PHP continua válido, só perde
+/// a extensão (o usuário ainda pode usar o Predis, que é PHP puro).
+#[cfg(windows)]
+fn win_install_pecl(tmp_dir: &Path, version: &str, package: &str) {
+    let minor = version.split('.').take(2).collect::<Vec<_>>().join(".");
+    let Some(compiler) = win_compiler(version) else { return };
+    let base = format!("https://windows.php.net/downloads/pecl/releases/{package}");
+    let Ok(listing) = download::get_string(&format!("{base}/")) else { return };
+    let re = regex::Regex::new(r"(\d+\.\d+\.\d+)/").unwrap();
+    let mut versions: Vec<String> = re.captures_iter(&listing).map(|c| c[1].to_string()).collect();
+    versions.sort_by(|a, b| version_key(b).cmp(&version_key(a)));
+    versions.dedup();
+    for v in versions {
+        let file = format!("php_{package}-{v}-{minor}-nts-{compiler}-x64.zip");
+        let Ok(dir_listing) = download::get_string(&format!("{base}/{v}/")) else { continue };
+        if !dir_listing.contains(&file) {
+            continue;
+        }
+        let archive = tmp_dir.join(format!(".pecl-{package}.zip"));
+        let out = tmp_dir.join(format!(".pecl-{package}"));
+        let done = download::download_to(&format!("{base}/{v}/{file}"), &archive, &mut |_, _| {}).is_ok()
+            && download::unpack_zip(&archive, &out).is_ok()
+            && fs::copy(out.join(format!("php_{package}.dll")), tmp_dir.join("ext").join(format!("php_{package}.dll"))).is_ok();
+        let _ = fs::remove_file(&archive);
+        let _ = fs::remove_dir_all(&out);
+        if done {
+            return;
+        }
+    }
+}
+
+#[cfg(windows)]
+fn install_win(base: &Path, version: &str, progress: &dyn Fn(InstallProgress)) -> Result<(), String> {
+    let final_dir = install_dir(base, version);
+    if crate::platform::bin(&final_dir, "php-fpm").is_file() {
+        return Ok(());
+    }
+    let urls = win_urls(version);
+    if urls.is_empty() {
+        return Err(format!("Não há PHP oficial para Windows na série de {version} (só x64, do 8.0 ao 8.5)."));
+    }
+    let root = php_root(base);
+    let tmp_dir = root.join(format!(".tmp-{version}"));
+    let archive = root.join(format!(".download-{version}.zip"));
+    let _ = fs::remove_dir_all(&tmp_dir);
+    fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+    let emit = |stage: &str, downloaded: u64, total: u64| {
+        progress(InstallProgress { id: version.to_string(), stage: stage.to_string(), downloaded, total, message: None });
+    };
+    let result = (|| -> Result<(), String> {
+        let mut last_err = String::new();
+        let mut ok = false;
+        for url in &urls {
+            match download::download_to(url, &archive, &mut |d, t| emit("download", d, t)) {
+                Ok(()) => { ok = true; break; }
+                Err(e) if e.contains("404") => last_err = e,
+                Err(e) => return Err(format!("PHP {version}: {e}")),
+            }
+        }
+        if !ok {
+            return Err(format!("PHP {version}: {last_err}"));
+        }
+        emit("extract", 0, 0);
+        fs::create_dir_all(&tmp_dir).map_err(|e| e.to_string())?;
+        download::unpack_zip(&archive, &tmp_dir)?;
+        let cgi = crate::platform::bin(&tmp_dir, "php-cgi");
+        if !cgi.is_file() || !crate::platform::bin(&tmp_dir, "php").is_file() {
+            return Err("o pacote baixado não contém o php-cgi.exe".into());
+        }
+        // O resto do app procura `php-fpm(.exe)`: é o mesmo binário CGI com outro nome.
+        fs::copy(&cgi, crate::platform::bin(&tmp_dir, "php-fpm")).map_err(|e| e.to_string())?;
+        // O PHP oficial não traz a extensão Redis: baixa do PECL (igbinary antes).
+        win_install_pecl(&tmp_dir, version, "igbinary");
+        win_install_pecl(&tmp_dir, version, "redis");
+        emit("verify", 0, 0);
+        let out = Command::new(&cgi).arg("-v").output().map_err(|e| format!("o binário baixado não executa: {e}"))?;
+        let text = String::from_utf8_lossy(&out.stdout);
+        if !text.contains(&format!("PHP {version}")) {
+            return Err(format!("verificação falhou: {}", text.lines().next().unwrap_or("sem saída")));
+        }
+        let _ = fs::remove_dir_all(&final_dir);
+        fs::rename(&tmp_dir, &final_dir).map_err(|e| e.to_string())?;
+        Ok(())
+    })();
+    let _ = fs::remove_file(&archive);
+    if result.is_err() {
+        let _ = fs::remove_dir_all(&tmp_dir);
+    }
+    result
+}
+
 /// Consulta o servidor e devolve todas as versões disponíveis para esta máquina.
+#[allow(unreachable_code)]
 pub fn catalog(base: &Path) -> Result<Vec<PhpRelease>, String> {
+    #[cfg(windows)]
+    {
+        return catalog_win(base);
+    }
     let platform = platform().ok_or("Esta plataforma ainda não é suportada para download do PHP.")?;
     let suffix = format!("-fpm-{platform}.tar.gz");
 
@@ -110,7 +287,7 @@ pub fn catalog(base: &Path) -> Result<Vec<PhpRelease>, String> {
 
 /// Caminho do PHP de linha de comando (`php`) de uma versão gerenciada, se instalado.
 pub fn cli_bin(base: &Path, version: &str) -> Option<PathBuf> {
-    let p = install_dir(base, version).join("php");
+    let p = crate::platform::bin(&install_dir(base, version), "php");
     p.is_file().then_some(p)
 }
 
@@ -153,9 +330,13 @@ pub fn install(
     if !valid_version(version) {
         return Err("versão inválida".into());
     }
+    #[cfg(windows)]
+    {
+        return install_win(base, version, progress);
+    }
     let platform = platform().ok_or("Plataforma não suportada.")?;
     let final_dir = install_dir(base, version);
-    if final_dir.join("php-fpm").is_file() {
+    if crate::platform::bin(&final_dir, "php-fpm").is_file() {
         return Ok(());
     }
 
@@ -217,6 +398,7 @@ pub fn install(
 
 /// Garante o PHP CLI de uma versão instalada pelo app (versões instaladas antes de o
 /// app baixar o CLI não o têm). Bloqueante.
+#[allow(unreachable_code)]
 pub fn ensure_cli(base: &Path, version: &str, progress: &dyn Fn(InstallProgress)) -> Result<PathBuf, String> {
     if !valid_version(version) {
         return Err("versão inválida".into());
@@ -225,8 +407,12 @@ pub fn ensure_cli(base: &Path, version: &str, progress: &dyn Fn(InstallProgress)
         return Ok(p);
     }
     let dir = install_dir(base, version);
-    if !dir.join("php-fpm").is_file() {
+    if !crate::platform::bin(&dir, "php-fpm").is_file() {
         return Err(format!("o PHP {version} não está instalado"));
+    }
+    #[cfg(windows)]
+    {
+        return Err("o pacote do PHP para Windows não trouxe o php.exe".into());
     }
     let platform = platform().ok_or("Plataforma não suportada.")?;
     let archive = php_root(base).join(format!(".download-{version}-cli.tar.gz"));
@@ -313,9 +499,16 @@ fn pick_common_version(listing: &serde_json::Value, full_version: &str, platform
 
 /// Garante o PHP com `pdo_pgsql` para uma versão instalada pelo app. Baixa o PHP-FPM e o CLI
 /// do pacote "common" na primeira vez. Bloqueante.
+#[allow(unreachable_code)]
 pub fn ensure_pg_flavor(base: &Path, full_version: &str, progress: &dyn Fn(InstallProgress)) -> Result<(), String> {
     if !valid_version(full_version) {
         return Err("versão inválida".into());
+    }
+    // No Windows o pacote oficial já traz as extensões do PostgreSQL: nada a baixar.
+    #[cfg(windows)]
+    {
+        let _ = (base, progress);
+        return Ok(());
     }
     if pg_fpm(base, full_version).is_some() && pg_cli(base, full_version).is_some() {
         return Ok(());
@@ -379,7 +572,13 @@ pub fn ensure_pg_flavor(base: &Path, full_version: &str, progress: &dyn Fn(Insta
 
 /// PHP-FPM a usar num projeto: o do pacote "common" quando o banco é PostgreSQL (baixado
 /// aqui se faltar), senão o normal. PHP do sistema (Homebrew) já vem com `pdo_pgsql`.
+#[allow(unreachable_code)]
 pub fn fpm_for(base: &Path, php: &tools::PhpInstall, postgres: bool) -> Result<PathBuf, String> {
+    #[cfg(windows)]
+    {
+        let _ = (base, postgres);
+        return Ok(php.fpm.clone());
+    }
     if !postgres || !php.managed {
         return Ok(php.fpm.clone());
     }
@@ -417,6 +616,21 @@ mod tests {
         assert_eq!(pick_common_version(&listing, "8.4.5", p).as_deref(), Some("8.4.23"), "mais novo da série (23 > 8)");
         assert_eq!(pick_common_version(&listing, "8.3.32", p).as_deref(), Some("8.3.30"));
         assert_eq!(pick_common_version(&listing, "8.5.1", p), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn catalogo_do_windows_le_a_listagem() {
+        let html = r#"<a href="php-8.4.13-nts-Win32-vs17-x64.zip">x</a>
+        <a href="php-8.4.12-nts-Win32-vs17-x64.zip">x</a>
+        <a href="php-8.3.30-nts-Win32-vs16-x64.zip">x</a>
+        <a href="php-8.4.13-ts-Win32-vs17-x64.zip">x</a>
+        <a href="php-7.4.33-nts-Win32-vc15-x64.zip">x</a>
+        <a href="php-8.4.13-nts-Win32-vs17-x86.zip">x</a>"#;
+        let cat = parse_win_catalog(html, &["8.3.30".to_string()]);
+        let versions: Vec<&str> = cat.iter().map(|r| r.version.as_str()).collect();
+        assert_eq!(versions, ["8.4.13", "8.4.12", "8.3.30"]);
+        assert!(cat[0].latest && !cat[1].latest && cat[2].installed);
     }
 
     #[test]

@@ -5,7 +5,8 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # `windows` é a branch de trabalho do suporte ao Windows: o CI roda nela também.
+    branches: [main, windows]
     paths-ignore: ["site/**", ".github/workflows/pages.yml"]
   pull_request:
     paths-ignore: ["site/**", ".github/workflows/pages.yml"]

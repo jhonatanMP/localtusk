@@ -5,8 +5,6 @@ Gratuito e open source (MIT). Funciona no **macOS** (Apple Silicon e Intel) e no
 
 Cada projeto roda com processos nativos isolados: **Caddy** (web) + **PHP-FPM** + **MySQL** ou **PostgreSQL** (e **Redis**, se você ligar), cada um com sua porta e seus dados em `~/LocalTusk/projects/<projeto>/`.
 
-> **Veio do LocalPHP?** O app mudou de nome na v0.6.0. Na primeira abertura, a pasta `~/LocalPHP` é renomeada sozinha para `~/LocalTusk`, com projetos, bancos, backups e blueprints intactos.
-
 ## Estado atual (MVP)
 
 - [x] Criar, iniciar, parar e apagar projetos
@@ -29,16 +27,17 @@ Cada projeto roda com processos nativos isolados: **Caddy** (web) + **PHP-FPM** 
 - [x] **Acessível na rede**: ligue para abrir o site em outros aparelhos da mesma rede (IP e nome `.local`); só o site é exposto, banco, Adminer Neo e Mailpit continuam locais. Para HTTPS sem aviso em outro aparelho, instale nele o certificado raiz (o app mostra o arquivo)
 - [ ] Domínios `.test` sem porta (opcional, exige configuração única com senha de administrador)
 - [ ] Git integrado
-- [x] Download do MySQL e do PostgreSQL no macOS e no Linux (no Windows ainda não)
+- [x] Download do MySQL e do PostgreSQL no macOS, no Linux e no Windows
 - [x] Backup e restauração de projetos (arquivos + banco) em `~/LocalTusk/backups`
 - [x] **Blueprints**: salve um projeto (arquivos, banco e versões de PHP/MySQL) como modelo em `~/LocalTusk/blueprints` e crie novos projetos já prontos a partir dele; dá para compartilhar o blueprint como arquivo e importar o de outra pessoa
 - [x] **Importar do Local**: lê os sites do [Local](https://localwp.com) (Linux e macOS; só leitura, nada na pasta dele é alterado) e cria um projeto do LocalTusk com os arquivos de `app/public` (links simbólicos viram cópias) e o banco salvo em `app/sql/local.sql`, com `siteurl`/`home` trocados para o endereço novo. O site precisa estar parado no Local; se faltar a versão do PHP ou do MySQL, o app oferece instalar ou usar a mais próxima
 - [x] Aba **API**: inspetor que mostra cada requisição recebida pelo projeto (cabeçalhos, corpo, formulário/arquivos, resposta, tempo; copiar como cURL e reenviar) e um cliente de API (métodos, cabeçalhos, corpo JSON/form/texto, redirecionamentos, histórico) com **coleção** de requisições salvas por projeto (`collection.json`), exportável e importável (também dá para salvar direto do inspetor), com layout que se adapta à largura da janela
 - [x] Aba **Mapa**: lê os arquivos PHP do projeto (sem executar nada), segue `require`/`include` e classes ligadas por `use`, `new`, `extends` e afins, e mostra quem chama quem em **lista** e em **grafo** (React Flow), com os arquivos que nenhum outro usa marcados como possíveis órfãos. A leitura é estática: não enxerga hooks do WordPress, rotas nem `require` com variável, então o resultado é uma pista, não uma ordem para apagar
+- [x] **Aviso de versão nova**: o app lê a última versão publicada no GitHub (ao abrir e a cada 6 horas) e mostra um banner com "Baixar" (no macOS, o `.dmg` da sua arquitetura), "Novidades" e "Agora não". Em "PHP e ferramentas" dá para verificar na hora ou desligar o aviso; desligado, o app não faz essa consulta. Não instala nada sozinho
 - [x] CI no GitHub Actions (`.github/workflows/ci.yml`): compila e testa em macOS, Linux e Windows
 - [x] **Linux (beta)**: PHP, MySQL, PostgreSQL, Redis, WordPress, HTTPS e rede passam nos testes ponta a ponta no Ubuntu 24.04 ARM64; o x86_64 e a interface gráfica ainda têm pouco uso real
 - [x] Instaladores publicados pelo GitHub Actions (`.github/workflows/release.yml`): `.dmg` (Apple Silicon e Intel), `.AppImage`, `.deb` e `.rpm` (x86_64 e ARM64)
-- [ ] Windows (o código compila, mas o app ainda não baixa o MySQL nem o PostgreSQL lá)
+- [x] Windows (beta): pilha completa validada em testes automáticos; o Redis usa o build comunitário do projeto redis-windows
 
 ## Pré-requisitos
 

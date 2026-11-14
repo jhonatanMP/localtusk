@@ -128,7 +128,7 @@ if (getenv('REDIS_HOST')) {
         $redis = new Redis();
         $redis->connect(getenv('REDIS_HOST'), (int) getenv('REDIS_PORT'));
         $info = $redis->info();
-        $redisStatus = 'conectado (Valkey ' . ($info['valkey_version'] ?? $info['redis_version'] ?? '?') . ')';
+        $redisStatus = 'conectado (' . (isset($info['valkey_version']) ? 'Valkey ' . $info['valkey_version'] : 'Redis ' . ($info['redis_version'] ?? '?')) . ')';
     } catch (Throwable $e) {
         $redisStatus = 'erro: ' . $e->getMessage();
     }
@@ -150,8 +150,12 @@ fn write(path: &Path, content: String) -> Result<(), String> {
 }
 
 fn q(path: &Path) -> String {
-    path.display().to_string()
+    // Barras normais: no Windows os arquivos de configuração (Caddyfile, my.cnf, php.ini)
+    // tratam "\\" como escape, e as APIs aceitam "/" sem problema.
+    path.display().to_string().replace('\\', "/")
 }
+
+
 
 struct MailCfg {
     bin: PathBuf,
@@ -166,7 +170,68 @@ struct Extras {
     mail: Option<MailCfg>,
 }
 
-fn write_configs(l: &Layout, p: &Project, fpm_port: u16, x: &Extras) -> Result<(), String> {
+
+/// Linhas de extensões para o `php.ini` do Windows: o PHP oficial de lá não traz nada
+/// ativado, então ligamos as extensões que o pacote tem (MySQL, PostgreSQL, curl...).
+#[cfg(windows)]
+fn windows_ext_lines(php_dir: &Path) -> String {
+    let ext_dir = php_dir.join("ext");
+    let mut out = format!("cgi.force_redirect=0\nextension_dir=\"{}\"\n", q(&ext_dir));
+    for name in [
+        "php_curl", "php_fileinfo", "php_mbstring", "php_openssl", "php_mysqli", "php_pdo_mysql",
+        "php_pgsql", "php_pdo_pgsql", "php_gd", "php_intl", "php_exif", "php_zip", "php_sodium", "php_bz2",
+    ] {
+        if ext_dir.join(format!("{name}.dll")).is_file() {
+            out.push_str(&format!("extension={name}\n"));
+        }
+    }
+    // O Redis do PECL depende do igbinary: ele precisa vir antes na lista.
+    for name in ["php_igbinary", "php_redis"] {
+        if ext_dir.join(format!("{name}.dll")).is_file() {
+            out.push_str(&format!("extension={name}\n"));
+        }
+    }
+    if ext_dir.join("php_opcache.dll").is_file() {
+        out.push_str("zend_extension=php_opcache\n");
+    }
+    out
+}
+
+#[cfg(not(windows))]
+fn windows_ext_lines(_php_dir: &Path) -> String {
+    String::new()
+}
+
+/// Variáveis de ambiente do PHP do projeto (banco, Redis, e-mail). No macOS/Linux vão
+/// para o `php-fpm.conf`; no Windows, para o ambiente do processo `php-cgi`.
+fn project_env(p: &Project, x: &Extras) -> Vec<(String, String)> {
+    let postgres = project::is_postgres(p);
+    let mut env: Vec<(String, String)> = vec![
+        ("DB_HOST".into(), "127.0.0.1".into()),
+        ("DB_PORT".into(), p.db_port.to_string()),
+        ("DB_NAME".into(), p.db_name.clone()),
+        ("DB_USER".into(), DB_USER.into()),
+        ("DB_PASSWORD".into(), DB_PASSWORD.into()),
+        ("DB_ENGINE".into(), project::engine_of(p).to_string()),
+        ("DB_CONNECTION".into(), if postgres { "pgsql".into() } else { "mysql".into() }),
+    ];
+    if project::redis_on(p) {
+        env.push(("REDIS_HOST".into(), "127.0.0.1".into()));
+        env.push(("REDIS_PORT".into(), p.redis_port.to_string()));
+        env.push(("REDIS_URL".into(), format!("redis://127.0.0.1:{}", p.redis_port)));
+    }
+    if let Some(m) = &x.mail {
+        for k in ["MAIL_HOST", "SMTP_HOST"] {
+            env.push((k.into(), "127.0.0.1".into()));
+        }
+        for k in ["MAIL_PORT", "SMTP_PORT"] {
+            env.push((k.into(), m.smtp.to_string()));
+        }
+    }
+    env
+}
+
+fn write_configs(l: &Layout, p: &Project, fpm_port: u16, x: &Extras, php_dir: &Path) -> Result<(), String> {
     let socket = l.mysql_socket(p);
     let postgres = project::is_postgres(p);
 
@@ -241,7 +306,7 @@ fn write_configs(l: &Layout, p: &Project, fpm_port: u16, x: &Extras) -> Result<(
     write(
         &l.conf.join("php.ini"),
         format!(
-            "{cacert}{mail_ini}\
+            "{cacert}{mail_ini}{win_ext}\
              auto_prepend_file={capture}\n\
              memory_limit=512M\n\
              upload_max_filesize=64M\n\
@@ -259,41 +324,11 @@ fn write_configs(l: &Layout, p: &Project, fpm_port: u16, x: &Extras) -> Result<(
             port = if postgres { 3306 } else { p.db_port },
             cacert = cacert,
             mail_ini = mail_ini,
+            win_ext = windows_ext_lines(php_dir),
             capture = q(&capture)
         ),
     )?;
-    let mut env_lines = format!(
-        "env[DB_HOST] = 127.0.0.1\n\
-         env[DB_PORT] = {}\n\
-         env[DB_NAME] = {}\n\
-         env[DB_USER] = {}\n\
-         env[DB_PASSWORD] = {}\n\
-         env[DB_ENGINE] = {}\n\
-         env[DB_CONNECTION] = {}\n",
-        p.db_port,
-        p.db_name,
-        DB_USER,
-        DB_PASSWORD,
-        project::engine_of(p),
-        if postgres { "pgsql" } else { "mysql" },
-    );
-    if project::redis_on(p) {
-        env_lines.push_str(&format!(
-            "env[REDIS_HOST] = 127.0.0.1\n\
-             env[REDIS_PORT] = {port}\n\
-             env[REDIS_URL] = redis://127.0.0.1:{port}\n",
-            port = p.redis_port
-        ));
-    }
-    if let Some(m) = &x.mail {
-        env_lines.push_str(&format!(
-            "env[MAIL_HOST] = 127.0.0.1\n\
-             env[MAIL_PORT] = {smtp}\n\
-             env[SMTP_HOST] = 127.0.0.1\n\
-             env[SMTP_PORT] = {smtp}\n",
-            smtp = m.smtp
-        ));
-    }
+    let env_lines: String = project_env(p, x).iter().map(|(k, v)| format!("env[{k}] = {v}\n")).collect();
     write(
         &l.conf.join("php-fpm.conf"),
         format!(
@@ -331,6 +366,12 @@ fn write_configs(l: &Layout, p: &Project, fpm_port: u16, x: &Extras) -> Result<(
 /// instantâneo em disco de vez em quando e mantém a linha de comando original no `ps`
 /// (assim o app reconhece e encerra um Valkey órfão pela pasta do projeto).
 fn render_valkey_conf(p: &Project, data: &str) -> String {
+    // Barra normal no caminho: dentro das aspas o Redis trata "\\" como escape e
+    // corromperia um caminho do Windows ("C:\\ltt\\..." viraria "C:ltt...").
+    let data = data.replace('\\', "/");
+    // No Windows não há desligamento gracioso (o processo morre por taskkill /F),
+    // então a persistência vai pelo AOF; nos outros sistemas o SIGTERM salva o RDB.
+    let appendonly = if cfg!(windows) { "yes" } else { "no" };
     format!(
         "bind 127.0.0.1\n\
          port {port}\n\
@@ -342,8 +383,9 @@ fn render_valkey_conf(p: &Project, data: &str) -> String {
          save 900 1\n\
          save 300 10\n\
          save 60 10000\n\
-         appendonly no\n",
-        port = p.redis_port
+         appendonly {appendonly}\n",
+        port = p.redis_port,
+        appendonly = appendonly
     )
 }
 
@@ -440,6 +482,12 @@ fn log_file(l: &Layout, name: &str) -> Result<File, String> {
 fn spawn(l: &Layout, mut cmd: Command, log: &str) -> Result<Child, String> {
     let out = log_file(l, log)?;
     let err = out.try_clone().map_err(|e| e.to_string())?;
+    // Sem isto cada serviço abriria uma janela de console no Windows.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
     cmd.stdin(Stdio::null())
         .stdout(Stdio::from(out))
         .stderr(Stdio::from(err))
@@ -674,7 +722,7 @@ pub fn start(base: &Path, p: &Project) -> Result<Running, String> {
         }),
     };
 
-    write_configs(&l, p, fpm_port, &x)?;
+    write_configs(&l, p, fpm_port, &x, php_fpm.parent().unwrap_or(Path::new("")))?;
     if let Some(pg) = &pg {
         if !pg_initialized(&l) {
             let initdb = pg.tool("initdb").ok_or("o PostgreSQL instalado não inclui o initdb")?;
@@ -736,6 +784,10 @@ pub fn start(base: &Path, p: &Project) -> Result<Running, String> {
         } else {
             let mut c = Command::new(&mysqld);
             c.arg(format!("--defaults-file={}", q(&l.conf.join("my.cnf"))));
+            // No Windows o mysqld cria um processo filho e o pai sai, o que escaparia
+            // do nosso controle; --standalone mantém um processo só.
+            #[cfg(windows)]
+            c.arg("--standalone");
             running.services.push(Service {
                 name: "MySQL",
                 log: "mysql.log",
@@ -746,7 +798,17 @@ pub fn start(base: &Path, p: &Project) -> Result<Running, String> {
 
         if let Some(v) = &valkey {
             let mut c = Command::new(&v.server);
-            c.arg(l.conf.join("valkey.conf"));
+            #[cfg(windows)]
+            {
+                // O redis-server do Windows é um build MSYS2 mínimo: ele não entende
+                // "C:\\...", "C:/..." nem "/c/..." como caminho absoluto do config
+                // (trata tudo como relativo ao cwd). Rodamos com cwd na pasta conf e
+                // passamos só o nome do arquivo.
+                c.current_dir(&l.conf);
+                c.arg("valkey.conf");
+            }
+            #[cfg(not(windows))]
+            c.arg(q(&l.conf.join("valkey.conf")));
             running.services.push(Service {
                 name: "Redis",
                 log: "valkey.log",
@@ -756,11 +818,25 @@ pub fn start(base: &Path, p: &Project) -> Result<Running, String> {
         }
 
         let mut c = Command::new(&php_fpm);
-        c.arg("-F")
-            .arg("-y")
-            .arg(l.conf.join("php-fpm.conf"))
-            .arg("-c")
-            .arg(l.conf.join("php.ini"));
+        // Windows: é o php-cgi.exe ouvindo FastCGI na porta; ambiente pelo processo.
+        #[cfg(windows)]
+        {
+            c.arg("-b")
+                .arg(format!("127.0.0.1:{fpm_port}"))
+                .arg("-c")
+                .arg(l.conf.join("php.ini"));
+            for (k, v) in project_env(p, &x) {
+                c.env(k, v);
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            c.arg("-F")
+                .arg("-y")
+                .arg(l.conf.join("php-fpm.conf"))
+                .arg("-c")
+                .arg(l.conf.join("php.ini"));
+        }
         running.services.push(Service {
             name: "PHP-FPM",
             log: "php-fpm.log",
@@ -882,19 +958,90 @@ pub fn kill_processes(found: &[(i32, String)]) -> usize {
     found.len()
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 pub fn reap_orphans(_base: &Path, _id: &str) -> usize {
     0
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 pub fn project_processes(_base: &Path, _id: &str) -> Vec<(i32, String)> {
     vec![]
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 pub fn kill_processes(_found: &[(i32, String)]) -> usize {
     0
+}
+
+/// Filtra a saída do PowerShell (`pid<TAB>nome<TAB>linha de comando`): só os serviços
+/// que o app sobe e cuja linha de comando cita a pasta do projeto.
+#[cfg(windows)]
+fn parse_win_processes(listing: &str, needle: &str, me: u32) -> Vec<(i32, String)> {
+    const NAMES: &[&str] = &[
+        "mysqld.exe", "postgres.exe", "valkey-server.exe", "redis-server.exe", "caddy.exe",
+        "mailpit.exe", "php-cgi.exe", "php-fpm.exe",
+    ];
+    listing
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.splitn(3, '\t');
+            let pid: u32 = parts.next()?.trim().parse().ok()?;
+            let name = parts.next()?.trim();
+            let cmd = parts.next()?.trim();
+            (pid != me && NAMES.contains(&name) && cmd.replace('\\', "/").to_lowercase().contains(&needle.to_lowercase()))
+                .then(|| (pid as i32, cmd.to_string()))
+        })
+        .collect()
+}
+
+#[cfg(windows)]
+pub fn project_processes(base: &Path, id: &str) -> Vec<(i32, String)> {
+    let needle = format!("{}/", project::project_dir(base, id).display().to_string().replace('\\', "/"));
+    let script = format!(
+        "$n = '{needle}'; Get-CimInstance Win32_Process | Where-Object {{ $_.CommandLine -and $_.CommandLine.Replace('\\','/').ToLower().Contains($n.ToLower()) }} | ForEach-Object {{ \"$($_.ProcessId)`t$($_.Name)`t$($_.CommandLine)\" }}"
+    );
+    let Ok(out) = Command::new("powershell").args(["-NoProfile", "-NonInteractive", "-Command", &script]).output() else {
+        return vec![];
+    };
+    let mut found = parse_win_processes(&String::from_utf8_lossy(&out.stdout), &needle, std::process::id());
+    // O Redis roda com cwd na pasta conf e a linha de comando só tem "valkey.conf"
+    // (sem o caminho do projeto): ele é achado pela porta em que está escutando.
+    // A porta sai do valkey.conf já gravado do projeto (não depende do registro).
+    let redis_port = fs::read_to_string(project::project_dir(base, id).join("conf/valkey.conf"))
+        .ok()
+        .and_then(|conf| conf.lines().find_map(|l| l.strip_prefix("port ")?.trim().parse::<u16>().ok()))
+        .unwrap_or(0);
+    if redis_port > 0 && !found.iter().any(|(_, c)| c.contains("redis-server") || c.contains("valkey-server")) {
+        let script = format!(
+            "$c = Get-NetTCPConnection -LocalPort {redis_port} -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1; if ($c) {{ $p = Get-CimInstance Win32_Process -Filter \"ProcessId = $($c.OwningProcess)\"; if ($p -and ($p.Name -eq 'redis-server.exe' -or $p.Name -eq 'valkey-server.exe')) {{ \"$($p.ProcessId)`t$($p.Name)`t$($p.CommandLine)\" }} }}"
+        );
+        if let Ok(out) = Command::new("powershell").args(["-NoProfile", "-NonInteractive", "-Command", &script]).output() {
+            for line in String::from_utf8_lossy(&out.stdout).lines() {
+                let mut parts = line.splitn(3, '\t');
+                if let (Some(pid), Some(_), Some(cmd)) = (parts.next(), parts.next(), parts.next()) {
+                    if let Ok(pid) = pid.trim().parse::<i32>() {
+                        if pid as u32 != std::process::id() && !found.iter().any(|(f, _)| *f == pid) {
+                            found.push((pid, cmd.trim().to_string()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    found
+}
+
+#[cfg(windows)]
+pub fn kill_processes(found: &[(i32, String)]) -> usize {
+    for (pid, _) in found {
+        let _ = Command::new("taskkill").args(["/PID", &pid.to_string(), "/T", "/F"]).output();
+    }
+    found.len()
+}
+
+#[cfg(windows)]
+pub fn reap_orphans(base: &Path, id: &str) -> usize {
+    kill_processes(&project_processes(base, id))
 }
 
 #[cfg(unix)]
@@ -904,8 +1051,14 @@ fn terminate(child: &Child, fast: bool) {
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 fn terminate(_child: &Child, _fast: bool) {}
+
+#[cfg(windows)]
+fn terminate(child: &Child, _fast: bool) {
+    // Encerra o processo e os filhos dele (o MySQL recupera sozinho no próximo início).
+    let _ = Command::new("taskkill").args(["/PID", &child.id().to_string(), "/T", "/F"]).output();
+}
 
 /// Para os serviços em ordem inversa (Caddy, PHP-FPM, Redis, banco), de forma graciosa.
 pub fn stop(running: &mut Running) {
@@ -963,7 +1116,23 @@ pub fn app_dir(base: &Path, id: &str) -> PathBuf {
 }
 
 #[cfg(test)]
+
 mod tests {
+    #[cfg(windows)]
+    #[test]
+    fn filtra_processos_do_windows() {
+        let needle = "C:/Users/dev/LocalTusk/projects/loja/";
+        let listing = concat!(
+            "1234\tmysqld.exe\t\"C:\\x\\mysqld.exe\" --defaults-file=C:/Users/dev/LocalTusk/projects/loja/conf/my.cnf\n",
+            "2222\tchrome.exe\tchrome C:/Users/dev/LocalTusk/projects/loja/\n",
+            "3333\tcaddy.exe\tcaddy run --config C:\\Users\\dev\\LocalTusk\\projects\\loja\\conf\\Caddyfile\n",
+            "4444\tmysqld.exe\tmysqld --defaults-file=C:/outro/projeto/conf/my.cnf\n",
+        );
+        let found = parse_win_processes(listing, needle, 9999);
+        let pids: Vec<i32> = found.iter().map(|f| f.0).collect();
+        assert_eq!(pids, [1234, 3333]);
+    }
+
     /// Só serviços nossos, do projeto certo, são tratados como órfãos.
     #[test]
     fn reconhece_servicos_orfaos_do_projeto() {
@@ -1051,14 +1220,43 @@ mod tests {
             fs::create_dir_all(to.parent().unwrap()).unwrap();
             #[cfg(unix)]
             std::os::unix::fs::symlink(&from, &to).unwrap();
+            // Sem privilégio de link simbólico (Windows sem modo desenvolvedor), copia.
             #[cfg(windows)]
-            std::os::windows::fs::symlink_dir(&from, &to).unwrap();
+            if std::os::windows::fs::symlink_dir(&from, &to).is_err() {
+                copy_dir(&from, &to);
+            }
         }
         base
     }
 
+    /// Copia uma pasta inteira (fallback dos links simbólicos nos testes do Windows).
+    #[cfg(windows)]
+    fn copy_dir(from: &Path, to: &Path) {
+        fs::create_dir_all(to).unwrap();
+        for e in fs::read_dir(from).unwrap().flatten() {
+            let dest = to.join(e.file_name());
+            if e.path().is_dir() {
+                copy_dir(&e.path(), &dest);
+            } else {
+                fs::copy(e.path(), dest).unwrap();
+            }
+        }
+    }
+
     /// Teste ponta a ponta: baixa (uma vez) Caddy, MySQL e PHP.
     /// Rode com: `cargo test -- --ignored --nocapture`
+    /// Espera a porta ficar livre (o fechamento do soquete pode demorar um instante,
+    /// sobretudo no Windows, onde o processo morre via taskkill).
+    fn assert_port_free(port: u16, what: &str) {
+        for _ in 0..100 {
+            if project::port_is_free(port) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        panic!("{what} ainda no ar");
+    }
+
     #[test]
     #[ignore]
     fn start_serve_stop() {
@@ -1084,8 +1282,8 @@ mod tests {
         assert!(body.contains("200 OK"), "resposta inesperada");
         assert!(body.contains("conectado"), "PHP não conectou ao MySQL");
         stop(&mut running);
-        assert!(project::port_is_free(http), "Caddy ainda no ar");
-        assert!(project::port_is_free(db), "MySQL ainda no ar");
+        assert_port_free(http, "Caddy");
+        assert_port_free(db, "MySQL");
         let _ = fs::remove_dir_all(&base);
     }
 
@@ -1467,7 +1665,8 @@ mod tests {
         }
         if valkey_manager::pick(&base).is_none() {
             let t = Instant::now();
-            valkey_manager::install(&base, valkey_manager::VERSION, &show).expect("valkey");
+            let vk_version = valkey_manager::catalog(&base).expect("catálogo do Redis")[0].version.clone();
+            valkey_manager::install(&base, &vk_version, &show).expect("valkey");
             println!("Valkey compilado em {:?}", t.elapsed());
         }
         assert!(valkey_manager::pick(&base).unwrap().cli().is_some());
@@ -1517,11 +1716,24 @@ echo 'ext=' . (extension_loaded('pdo_pgsql') ? 'pdo_pgsql' : 'sem') . "\n";
         )
         .unwrap();
 
+        #[cfg(windows)]
+        {
+            // Diagnóstico do PECL: sem php_redis.dll carregada a página quebra.
+            let cli = crate::php_manager::ensure_cli(&base, &php.full_version, &|_| {}).expect("php cli");
+            let mods = Command::new(&cli).args(["-c", "NUL", "-m"]).output().unwrap();
+            println!("php -m (sem ini): {}", String::from_utf8_lossy(&mods.stdout).replace('\n', ","));
+            let ext_dir = cli.parent().unwrap().join("ext");
+            let dlls: Vec<String> = fs::read_dir(&ext_dir).map(|rd| rd.filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().to_string())).filter(|n| n.contains("redis") || n.contains("igbinary")).collect()).unwrap_or_default();
+            println!("dlls pecl em ext/: {dlls:?}");
+        }
         let t = Instant::now();
         let mut running = start(&base, &p).expect("start falhou");
         println!("start (com download do PHP common) em {:?}", t.elapsed());
-        assert!(crate::php_manager::pg_fpm(&base, &php.full_version).is_some(), "o PHP common deveria ter sido baixado");
-        assert!(crate::php_manager::pg_cli(&base, &php.full_version).is_some());
+        #[cfg(not(windows))]
+        {
+            assert!(crate::php_manager::pg_fpm(&base, &php.full_version).is_some(), "o PHP common deveria ter sido baixado");
+            assert!(crate::php_manager::pg_cli(&base, &php.full_version).is_some());
+        }
 
         let body = http_get(http);
         println!("{}", body.lines().rev().take(6).collect::<Vec<_>>().join(" | "));
@@ -1537,22 +1749,29 @@ echo 'ext=' . (extension_loaded('pdo_pgsql') ? 'pdo_pgsql' : 'sem') . "\n";
         }
 
         // Grava dados nos dois e confere pelo PHP.
+        println!("fase: gravar dados");
         let body = http_request(http, "GET", "/?add=primeira&set=valor1", "", "");
         assert!(body.contains("notas=primeira") && body.contains("redis=valor1"), "{body}");
+        println!("fase: dados gravados");
 
         // A página de exemplo padrão também entende PostgreSQL e Redis.
+        println!("fase: página de exemplo");
         let sample = docroot_dir(&base, &p).join("sample.php");
         fs::write(&sample, SAMPLE_INDEX).unwrap();
         let body = http_get_path(http, "/sample.php");
-        assert!(body.contains("PostgreSQL 16") && body.contains("Valkey"), "{body}");
+        // No Windows o servidor é o Redis (redis-windows): a página mostra "Redis".
+        assert!(body.contains("PostgreSQL 16") && (body.contains("Valkey") || body.contains("Redis")), "{body}");
         let _ = fs::remove_file(&sample);
 
+println!("fase: backup");
         // --- Backup e restauração (pg_dump / psql) ---
         let archive = crate::backup::create(&base, &p, "", "backup-teste", &|_| {}).expect("backup");
+        println!("fase: backup criado");
         let manifest = crate::backup::read_manifest(&archive).unwrap();
         assert_eq!(manifest.db_engine, "postgres");
         psql(&pg.tool("psql").unwrap(), db, "pgredis", "DROP TABLE notas").expect("drop");
         crate::backup::restore_into(&base, &p, crate::backup::RestoreSource::Archive(&archive), "restore-teste", &|_| {}).expect("restore");
+        println!("fase: backup restaurado");
         // restore_into apaga a pasta app/ e traz a do backup de volta (com o index.php do teste).
         let body = http_get(http);
         assert!(body.contains("notas=primeira"), "dados não voltaram do backup: {body}");
@@ -1561,12 +1780,25 @@ echo 'ext=' . (extension_loaded('pdo_pgsql') ? 'pdo_pgsql' : 'sem') . "\n";
         let err = crate::backup::restore_into(&base, &mysql_twin, crate::backup::RestoreSource::Archive(&archive), "x", &|_| {}).unwrap_err();
         assert!(err.contains("PostgreSQL") && err.contains("MySQL"), "{err}");
 
+println!("fase: terminal");
         // --- Terminal: atalhos já ligados ao banco e ao Redis ---
         let script = crate::wp::prepare_terminal(&base, &p).expect("terminal");
         let script_text = fs::read_to_string(&script).unwrap();
-        assert!(script_text.contains("export PGPORT=") && script_text.contains("export REDIS_PORT="), "{script_text}");
+        if cfg!(windows) {
+            assert!(script_text.contains("PGPORT=") && script_text.contains("REDIS_PORT="), "{script_text}");
+        } else {
+            assert!(script_text.contains("export PGPORT=") && script_text.contains("export REDIS_PORT="), "{script_text}");
+        }
         let shims = project::project_dir(&base, &p.id).join("conf").join("shims");
-        let psql_out = Command::new(shims.join("psql"))
+        // No Windows os atalhos são `.bat`: só rodam pelo cmd.
+        let mut psql_cmd = if cfg!(windows) {
+            let mut c = Command::new("cmd");
+            c.arg("/C").arg(shims.join("psql.bat"));
+            c
+        } else {
+            Command::new(shims.join("psql"))
+        };
+        let psql_out = psql_cmd
             .env("PGHOST", "127.0.0.1")
             .env("PGPORT", db.to_string())
             .env("PGUSER", "root")
@@ -1576,9 +1808,17 @@ echo 'ext=' . (extension_loaded('pdo_pgsql') ? 'pdo_pgsql' : 'sem') . "\n";
             .output()
             .unwrap();
         assert_eq!(String::from_utf8_lossy(&psql_out.stdout).trim(), "1", "{}", String::from_utf8_lossy(&psql_out.stderr));
-        let ping = Command::new(shims.join("redis-cli")).arg("ping").output().unwrap();
+        let mut redis_cmd = if cfg!(windows) {
+            let mut c = Command::new("cmd");
+            c.arg("/C").arg(shims.join("redis-cli.bat"));
+            c
+        } else {
+            Command::new(shims.join("redis-cli"))
+        };
+        let ping = redis_cmd.arg("ping").output().unwrap();
         assert_eq!(String::from_utf8_lossy(&ping.stdout).trim(), "PONG");
 
+println!("fase: parar");
         // --- Parar: tudo para e as portas voltam ---
         let t = Instant::now();
         stop(&mut running);
@@ -1589,11 +1829,13 @@ echo 'ext=' . (extension_loaded('pdo_pgsql') ? 'pdo_pgsql' : 'sem') . "\n";
         let log = fs::read_to_string(project::project_dir(&base, "pgredis").join("logs/postgres.log")).unwrap_or_default();
         assert!(!log.contains("PANIC") && !log.contains("FATAL:  data directory"), "{log}");
 
+println!("fase: segunda subida");
         // --- Segunda subida: os dados persistem (banco e Redis) ---
         let mut running = start(&base, &p).expect("2º start falhou");
         let body = http_get(http);
         assert!(body.contains("notas=primeira") && body.contains("redis=valor1"), "dados não persistiram: {body}");
 
+println!("fase: órfãos");
         // --- Órfãos: um app morto à força deixa os serviços; o próximo start/abertura os encerra ---
         // Largamos os processos sem pará-los (como um app morto à força); as threads só recolhem
         // o processo depois que ele sair, para não virar zumbi deste teste.
@@ -1603,9 +1845,10 @@ echo 'ext=' . (extension_loaded('pdo_pgsql') ? 'pdo_pgsql' : 'sem') . "\n";
             });
         }
         let found = project_processes(&base, &p.id);
-        let names: Vec<String> = found.iter().map(|(_, c)| c.split_whitespace().next().unwrap_or("").rsplit('/').next().unwrap_or("").to_string()).collect();
+        let names: Vec<String> = found.iter().map(|(_, c)| c.split_whitespace().next().unwrap_or("").rsplit(['/', '\\']).next().unwrap_or("").trim_matches('"').to_string()).collect();
         println!("órfãos reconhecidos: {names:?}");
-        for expected in ["postgres", "valkey-server", "caddy"] {
+        let expected: &[&str] = if cfg!(windows) { &["postgres.exe", "redis-server.exe", "caddy.exe"] } else { &["postgres", "valkey-server", "caddy"] };
+        for expected in expected {
             assert!(names.iter().any(|n| n == expected), "não reconheceu {expected}: {names:?}");
         }
         assert!(php_fpm_seen(&found), "não reconheceu o php-fpm");
@@ -1635,7 +1878,7 @@ echo 'ext=' . (extension_loaded('pdo_pgsql') ? 'pdo_pgsql' : 'sem') . "\n";
     }
 
     fn php_fpm_seen(found: &[(i32, String)]) -> bool {
-        found.iter().any(|(_, c)| c.starts_with("php-fpm:"))
+        found.iter().any(|(_, c)| c.starts_with("php-fpm:") || c.contains("php-fpm.exe") || c.contains("php-cgi.exe"))
     }
 
     /// Instala o WordPress de verdade (WP-CLI + PHP CLI + MySQL), confere o site e os atalhos

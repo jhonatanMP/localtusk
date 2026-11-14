@@ -81,6 +81,24 @@ def find_linux(series, version, variants):
     return None
 
 
+def find_windows(series, version):
+    file = f"mysql-{version}-winx64.zip"
+    for path in candidates(series):
+        size = head(f"{CDN}/{path}/{file}")
+        if size is not None:
+            return {"path": path, "file": file, "bytes": size}
+    return None
+
+
+def add_windows(versions):
+    for v in versions:
+        v["builds"].pop("win-x86_64", None)
+        build = find_windows(v["series"], v["version"])
+        if build:
+            v["builds"]["win-x86_64"] = build
+        print(f"  {v['version']}: windows {'win-x86_64' if build else '-'}")
+
+
 def add_linux(versions):
     for v in versions:
         for key, variants in LINUX_ARCHS.items():
@@ -100,9 +118,12 @@ def save(versions):
 
 
 def main():
-    if "--linux" in sys.argv:
+    if "--linux" in sys.argv or "--windows" in sys.argv:
         versions = json.loads(OUT.read_text())["versions"]
-        add_linux(versions)
+        if "--linux" in sys.argv:
+            add_linux(versions)
+        if "--windows" in sys.argv:
+            add_windows(versions)
         save(versions)
         return
     versions = []

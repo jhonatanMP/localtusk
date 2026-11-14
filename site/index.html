@@ -110,7 +110,7 @@
           <li><svg class="ico"><use href="assets/img/icons.svg#i-check"/></svg> Sem conta e sem telemetria</li>
           <li><svg class="ico"><use href="assets/img/icons.svg#i-check"/></svg> Seus dados ficam na sua máquina</li>
         </ul>
-        <p class="hero-note" data-hero><span data-cta-meta>Para macOS (Apple Silicon e Intel) e Linux (x86_64 e ARM64). Windows em desenvolvimento.</span></p>
+        <p class="hero-note" data-hero><span data-cta-meta>Para macOS (Apple Silicon e Intel), Linux (x86_64 e ARM64) e Windows (x64).</span></p>
 
         <div class="stage" data-hero>
           <div class="window">
@@ -373,7 +373,7 @@
               </tr>
               <tr>
                 <th scope="row">Plataformas</th>
-                <td class="us">macOS e Linux (beta)<br><span class="no">Windows em desenvolvimento</span></td>
+                <td class="us">macOS, Linux (beta) e Windows (beta)</td>
                 <td>macOS e Windows</td>
                 <td>macOS e Windows</td>
                 <td>Windows, macOS e Linux</td>
@@ -420,7 +420,7 @@
           </article>
           <article class="card" data-reveal>
             <h3>Laravel Herd</h3>
-            <p>Faz mais sentido se o seu foco é Laravel e você quer a integração oficial, ou se precisa de Windows hoje. Bancos e e-mail ficam no plano pago.</p>
+            <p>Faz mais sentido se o seu foco é Laravel e você quer a integração oficial. Bancos e e-mail ficam no plano pago.</p>
           </article>
           <article class="card" data-reveal>
             <h3>Local (LocalWP)</h3>
@@ -428,14 +428,14 @@
           </article>
           <article class="card" data-reveal>
             <h3>FlyEnv, ServBay e Laragon</h3>
-            <p>Atendem melhor quem precisa de Windows ou Linux agora ou de várias linguagens além do PHP.</p>
+            <p>Atendem melhor quem precisa de várias linguagens além do PHP.</p>
           </article>
         </div>
 
         <div class="limits" data-reveal>
           <h3><svg class="ico"><use href="assets/img/icons.svg#i-alert"/></svg> O que o LocalTusk ainda não tem</h3>
           <ul>
-            <li>Windows: o código compila lá, mas a instalação do MySQL e do PostgreSQL e o uso completo ainda estão em desenvolvimento. No Linux o app é beta: a pilha completa foi testada no Ubuntu 24.04 (ARM64), mas ainda tem poucas horas de uso real e o HTTPS precisa ter o certificado instalado à mão.</li>
+            <li>Windows e Linux são beta: a pilha completa passa nos testes automáticos (no Windows, com runners do GitHub; no Linux, no Ubuntu 24.04 ARM64), mas ainda tem poucas horas de uso real, e o HTTPS precisa ter o certificado instalado à mão. No Windows o Redis é o build comunitário do projeto redis-windows, não um binário oficial.</li>
             <li>Outras linguagens e bancos: por enquanto o app cobre PHP 8.x com MySQL ou PostgreSQL e Redis (MongoDB e outros ficam de fora). O WordPress só funciona em projetos MySQL.</li>
             <li>Mapa do projeto: a leitura é estática e feita para PHP puro e Composer. Ela não enxerga hooks do WordPress, rotas, nomes de classe montados em variável nem <code>require</code> com variável, então um arquivo carregado assim pode aparecer como órfão por engano. Use o resultado como pista, não como ordem para apagar.</li>
             <li>Anos de estrada: é um projeto novo, com comunidade pequena.</li>
@@ -498,7 +498,7 @@ Software…</div>
           </details>
           <details>
             <summary>Funciona no Linux e no Windows? <svg class="ico"><use href="assets/img/icons.svg#i-chevron"/></svg></summary>
-            <div class="answer">Funciona no Linux, em versão beta: há instaladores <code>.AppImage</code>, <code>.deb</code> e <code>.rpm</code> para x86_64 e ARM64, e a pilha completa (PHP, MySQL, PostgreSQL, Redis, Caddy, terminal e backups) passou nos nossos testes no Ubuntu 24.04 (ARM64). O macOS segue sendo o sistema principal. No Windows o código compila, mas a instalação dos bancos e o uso completo ainda estão em desenvolvimento.</div>
+            <div class="answer">Funciona. No Linux, em versão beta: há instaladores <code>.AppImage</code>, <code>.deb</code> e <code>.rpm</code> para x86_64 e ARM64, e a pilha completa (PHP, MySQL, PostgreSQL, Redis, Caddy, terminal e backups) passou nos nossos testes no Ubuntu 24.04 (ARM64). No Windows, também beta: instalador <code>.exe</code> (x64) e a mesma pilha validada em testes automáticos; o Redis usa o build comunitário do projeto redis-windows. O macOS segue sendo o sistema principal.</div>
           </details>
           <details>
             <summary>É gratuito mesmo? <svg class="ico"><use href="assets/img/icons.svg#i-chevron"/></svg></summary>
@@ -522,7 +522,7 @@ Software…</div>
           </details>
           <details>
             <summary>O app envia dados sobre mim? <svg class="ico"><use href="assets/img/icons.svg#i-chevron"/></svg></summary>
-            <div class="answer">Não. Não há telemetria nem conta. O app só acessa a internet para baixar os componentes (PHP, MySQL, PostgreSQL, Valkey, Caddy, Mailpit, Adminer Neo, WP-CLI e WordPress) das fontes oficiais. Os detalhes estão na <a href="privacidade/">política de privacidade</a>.</div>
+            <div class="answer">Não. Não há telemetria nem conta. O app só acessa a internet para baixar os componentes (PHP, MySQL, PostgreSQL, Valkey, Caddy, Mailpit, Adminer Neo, WP-CLI e WordPress) das fontes oficiais e para ver se há uma versão nova do próprio LocalTusk, o que dá para desligar. Os detalhes estão na <a href="privacidade/">política de privacidade</a>.</div>
           </details>
           <details>
             <summary>Qual a diferença para XAMPP, Herd ou Local? <svg class="ico"><use href="assets/img/icons.svg#i-chevron"/></svg></summary>

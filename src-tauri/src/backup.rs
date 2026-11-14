@@ -111,7 +111,7 @@ fn stamp(secs: u64) -> String {
 /// Cliente do MySQL (`mysql`, `mysqldump`) da mesma instalação do `mysqld` do projeto.
 fn mysql_tool(base: &Path, p: &Project, name: &str) -> Result<PathBuf, String> {
     mysql_manager::pick(base, &p.db_version)
-        .and_then(|i| i.mysqld.parent().map(|d| d.join(name)))
+        .and_then(|i| i.mysqld.parent().map(|d| crate::platform::bin(&d, name)))
         .filter(|f| f.is_file())
         .ok_or_else(|| format!("O MySQL instalado não inclui o `{name}`. Instale um MySQL em \"PHP e ferramentas\"."))
 }

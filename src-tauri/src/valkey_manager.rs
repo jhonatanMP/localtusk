@@ -26,6 +26,7 @@ pub fn valkey_root(base: &Path) -> PathBuf {
     base.join("bin").join("valkey")
 }
 
+#[allow(unreachable_code)]
 pub fn install_dir(base: &Path, version: &str) -> PathBuf {
     valkey_root(base).join(version)
 }
@@ -51,6 +52,15 @@ pub struct ValkeyRelease {
 
 /// A versão que o app instala nesta máquina.
 pub fn catalog(base: &Path) -> Result<Vec<ValkeyRelease>, String> {
+    // No Windows não há Valkey: usamos o Redis do projeto comunitário redis-windows.
+    #[cfg(windows)]
+    {
+        return Ok(vec![ValkeyRelease {
+            version: WIN_VERSION.into(),
+            size: format!("{} MB", WIN_ZIP_BYTES.div_ceil(1024 * 1024)),
+            installed: managed_versions(base).iter().any(|v| v == WIN_VERSION),
+        }]);
+    }
     if cfg!(not(unix)) {
         return Err("O Redis (Valkey) só está disponível para macOS e Linux por enquanto.".into());
     }
@@ -60,6 +70,15 @@ pub fn catalog(base: &Path) -> Result<Vec<ValkeyRelease>, String> {
         installed: managed_versions(base).iter().any(|v| v == VERSION),
     }])
 }
+
+/// Versão e integridade do Redis para Windows (projeto comunitário redis-windows,
+/// build MSYS2 do Redis oficial). Sem compilação: baixa, confere e extrai.
+#[cfg(windows)]
+const WIN_VERSION: &str = "8.10.3";
+#[cfg(windows)]
+const WIN_ZIP_SHA256: &str = "af16df340525b431e9ec8dabfd625d5e7a233f82805b5418819904ea909c447f";
+#[cfg(windows)]
+const WIN_ZIP_BYTES: u64 = 14_036_243;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -71,8 +90,10 @@ pub struct ValkeyInstall {
 impl ValkeyInstall {
     /// `valkey-cli` (o cliente de linha de comando), ao lado do servidor.
     pub fn cli(&self) -> Option<PathBuf> {
-        let p = self.server.parent()?.join("valkey-cli");
-        p.is_file().then_some(p)
+        let dir = self.server.parent()?;
+        [crate::platform::bin(dir, "valkey-cli"), crate::platform::bin(dir, "redis-cli")]
+            .into_iter()
+            .find(|p| p.is_file())
     }
 }
 
@@ -89,7 +110,8 @@ pub fn installs(base: &Path) -> Vec<ValkeyInstall> {
         .flatten()
         .filter_map(|e| {
             let version = e.file_name().to_string_lossy().to_string();
-            let server = e.path().join("valkey-server");
+            let server = crate::platform::bin(&e.path(), "valkey-server");
+            let server = if server.is_file() { server } else { crate::platform::bin(&e.path(), "redis-server") };
             (valid_version(&version) && server.is_file()).then_some(ValkeyInstall { full_version: version, server })
         })
         .collect();
@@ -148,6 +170,10 @@ fn in_path(name: &str) -> bool {
 
 /// Baixa o código-fonte, confere o SHA-256, compila e valida. Bloqueante.
 pub fn install(base: &Path, version: &str, progress: &dyn Fn(InstallProgress)) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        return install_win(base, version, progress);
+    }
     if version != VERSION {
         return Err(format!("Só a versão {VERSION} do Valkey está disponível."));
     }
@@ -249,6 +275,76 @@ pub fn install(base: &Path, version: &str, progress: &dyn Fn(InstallProgress)) -
     result
 }
 
+
+/// Instalação no Windows: baixa o Redis (build comunitário redis-windows), confere o
+/// SHA-256 e extrai. O servidor fica como `redis-server.exe` na pasta da versão.
+#[cfg(windows)]
+fn install_win(base: &Path, version: &str, progress: &dyn Fn(InstallProgress)) -> Result<(), String> {
+    if version != WIN_VERSION {
+        return Err(format!("Só a versão {WIN_VERSION} do Redis está disponível no Windows."));
+    }
+    let final_dir = install_dir(base, version);
+    if crate::platform::bin(&final_dir, "redis-server").is_file() {
+        return Ok(());
+    }
+    let id = format!("valkey-{version}");
+    let emit = |stage: &str, downloaded: u64, total: u64, message: Option<&str>| {
+        progress(InstallProgress { id: id.clone(), stage: stage.to_string(), downloaded, total, message: message.map(String::from) });
+    };
+    let root = valkey_root(base);
+    let tmp_dir = root.join(format!(".tmp-{version}"));
+    let archive = root.join(format!(".download-{version}.zip"));
+    let _ = fs::remove_dir_all(&tmp_dir);
+    fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+    let result = (|| -> Result<(), String> {
+        let url = format!("https://github.com/redis-windows/redis-windows/releases/download/{version}/Redis-{version}-Windows-x64-msys2.zip");
+        download::download_to(&url, &archive, &mut |d, t| emit("download", d, t, None)).map_err(|e| format!("Redis {version}: {e}"))?;
+        emit("verify", 0, 0, None);
+        if download::sha256_hex(&archive)? != WIN_ZIP_SHA256 {
+            return Err(format!("verificação de integridade (SHA-256) do Redis {version} falhou"));
+        }
+        emit("extract", 0, 0, None);
+        fs::create_dir_all(&tmp_dir).map_err(|e| e.to_string())?;
+        download::unpack_zip(&archive, &tmp_dir)?;
+        // O zip traz uma pasta raiz (Redis-<versão>-Windows-x64-msys2/): sobe o conteúdo dela.
+        if !crate::platform::bin(&tmp_dir, "redis-server").is_file() {
+            let mut inner = None;
+            for e in fs::read_dir(&tmp_dir).map_err(|e| e.to_string())? {
+                let path = e.map_err(|e| e.to_string())?.path();
+                if path.is_dir() && crate::platform::bin(&path, "redis-server").is_file() {
+                    inner = Some(path);
+                    break;
+                }
+            }
+            if let Some(inner) = inner {
+                for e in fs::read_dir(&inner).map_err(|e| e.to_string())? {
+                    let from = e.map_err(|e| e.to_string())?.path();
+                    let to = tmp_dir.join(from.file_name().unwrap());
+                    fs::rename(&from, &to).map_err(|e| e.to_string())?;
+                }
+                let _ = fs::remove_dir_all(&inner);
+            }
+        }
+        let server = crate::platform::bin(&tmp_dir, "redis-server");
+        if !server.is_file() {
+            return Err("o pacote do Redis não contém o redis-server.exe".into());
+        }
+        let out = Command::new(&server).arg("--version").output().map_err(|e| format!("o redis-server baixado não executa: {e}"))?;
+        let text = String::from_utf8_lossy(&out.stdout);
+        if !text.contains(&format!("v={version}")) {
+            return Err(format!("verificação falhou: {}", text.lines().next().unwrap_or("sem saída")));
+        }
+        let _ = fs::remove_dir_all(&final_dir);
+        fs::rename(&tmp_dir, &final_dir).map_err(|e| e.to_string())?;
+        Ok(())
+    })();
+    let _ = fs::remove_file(&archive);
+    if result.is_err() {
+        let _ = fs::remove_dir_all(&tmp_dir);
+    }
+    result
+}
+
 pub fn uninstall(base: &Path, version: &str) -> Result<(), String> {
     if !valid_version(version) {
         return Err("versão inválida".into());
@@ -280,7 +376,7 @@ mod tests {
         for v in ["8.1.0", "9.0.7"] {
             let d = install_dir(&base, v);
             fs::create_dir_all(&d).unwrap();
-            fs::write(d.join("valkey-server"), "").unwrap();
+            fs::write(crate::platform::bin(&d, "valkey-server"), "").unwrap();
         }
         fs::create_dir_all(valkey_root(&base).join(".tmp-9.9.9")).unwrap();
         assert_eq!(pick(&base).unwrap().full_version, "9.0.7");

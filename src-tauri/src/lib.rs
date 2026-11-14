@@ -8,11 +8,13 @@ mod extras;
 mod local_import;
 mod mysql_manager;
 mod php_manager;
+mod platform;
 mod postgres_manager;
 mod project;
 mod runtime;
 mod ssl;
 mod tools;
+mod update;
 mod valkey_manager;
 mod wp;
 
@@ -66,6 +68,8 @@ pub fn run() {
             commands::open_folder,
             commands::read_log,
             commands::analyze_project,
+            commands::check_update,
+            commands::open_update_page,
             commands::app_info,
             commands::open_data_dir,
             commands::php_catalog,

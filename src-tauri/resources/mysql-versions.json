@@ -1,5 +1,5 @@
 {
- "generated": "2026-11-12",
+ "generated": "2026-11-13",
  "versions": [
   {
    "version": "9.7.4",
@@ -24,6 +24,11 @@
      "path": "Downloads/MySQL-9.7",
      "file": "mysql-9.7.4-linux-glibc2.28-aarch64.tar.xz",
      "bytes": 977757720
+    },
+    "win-x86_64": {
+     "path": "Downloads/MySQL-9.7",
+     "file": "mysql-9.7.4-winx64.zip",
+     "bytes": 344052123
     }
    }
   },
@@ -50,6 +55,11 @@
      "path": "Downloads/MySQL-9.7",
      "file": "mysql-9.7.2-linux-glibc2.28-aarch64.tar.xz",
      "bytes": 972326724
+    },
+    "win-x86_64": {
+     "path": "Downloads/MySQL-9.7",
+     "file": "mysql-9.7.2-winx64.zip",
+     "bytes": 342737674
     }
    }
   },
@@ -76,6 +86,11 @@
      "path": "archives/mysql-9.7",
      "file": "mysql-9.7.1-linux-glibc2.28-aarch64.tar.xz",
      "bytes": 969502904
+    },
+    "win-x86_64": {
+     "path": "archives/mysql-9.7",
+     "file": "mysql-9.7.1-winx64.zip",
+     "bytes": 340920144
     }
    }
   },
@@ -102,6 +117,11 @@
      "path": "archives/mysql-9.7",
      "file": "mysql-9.7.0-linux-glibc2.28-aarch64.tar.xz",
      "bytes": 969434216
+    },
+    "win-x86_64": {
+     "path": "archives/mysql-9.7",
+     "file": "mysql-9.7.0-winx64.zip",
+     "bytes": 340476547
     }
    }
   },
@@ -123,6 +143,11 @@
      "path": "Downloads/MySQL-8.4",
      "file": "mysql-8.4.13-linux-glibc2.28-aarch64.tar.xz",
      "bytes": 823781920
+    },
+    "win-x86_64": {
+     "path": "Downloads/MySQL-8.4",
+     "file": "mysql-8.4.13-winx64.zip",
+     "bytes": 281154912
     }
    }
   },
@@ -149,6 +174,11 @@
      "path": "Downloads/MySQL-8.4",
      "file": "mysql-8.4.11-linux-glibc2.28-aarch64.tar.xz",
      "bytes": 821708368
+    },
+    "win-x86_64": {
+     "path": "Downloads/MySQL-8.4",
+     "file": "mysql-8.4.11-winx64.zip",
+     "bytes": 281191914
     }
    }
   },
@@ -175,6 +205,11 @@
      "path": "Downloads/MySQL-8.4",
      "file": "mysql-8.4.10-linux-glibc2.28-aarch64.tar.xz",
      "bytes": 821008144
+    },
+    "win-x86_64": {
+     "path": "Downloads/MySQL-8.4",
+     "file": "mysql-8.4.10-winx64.zip",
+     "bytes": 280672277
     }
    }
   },
@@ -201,6 +236,11 @@
      "path": "Downloads/MySQL-8.4",
      "file": "mysql-8.4.9-linux-glibc2.28-aarch64.tar.xz",
      "bytes": 821007868
+    },
+    "win-x86_64": {
+     "path": "archives/mysql-8.4",
+     "file": "mysql-8.4.9-winx64.zip",
+     "bytes": 280452577
     }
    }
   },
@@ -227,6 +267,11 @@
      "path": "archives/mysql-8.4",
      "file": "mysql-8.4.8-linux-glibc2.28-aarch64.tar.xz",
      "bytes": 909582316
+    },
+    "win-x86_64": {
+     "path": "archives/mysql-8.4",
+     "file": "mysql-8.4.8-winx64.zip",
+     "bytes": 260192668
     }
    }
   },
@@ -253,6 +298,11 @@
      "path": "archives/mysql-8.4",
      "file": "mysql-8.4.7-linux-glibc2.28-aarch64.tar.xz",
      "bytes": 909386108
+    },
+    "win-x86_64": {
+     "path": "archives/mysql-8.4",
+     "file": "mysql-8.4.7-winx64.zip",
+     "bytes": 260872794
     }
    }
   },
@@ -279,6 +329,11 @@
      "path": "archives/mysql-8.4",
      "file": "mysql-8.4.6-linux-glibc2.28-aarch64.tar.xz",
      "bytes": 909017708
+    },
+    "win-x86_64": {
+     "path": "archives/mysql-8.4",
+     "file": "mysql-8.4.6-winx64.zip",
+     "bytes": 260772595
     }
    }
   },
@@ -305,6 +360,11 @@
      "path": "archives/mysql-8.4",
      "file": "mysql-8.4.5-linux-glibc2.28-aarch64.tar.xz",
      "bytes": 907157500
+    },
+    "win-x86_64": {
+     "path": "archives/mysql-8.4",
+     "file": "mysql-8.4.5-winx64.zip",
+     "bytes": 259799354
     }
    }
   },
@@ -331,6 +391,11 @@
      "path": "archives/mysql-8.4",
      "file": "mysql-8.4.4-linux-glibc2.28-aarch64.tar.xz",
      "bytes": 898509848
+    },
+    "win-x86_64": {
+     "path": "archives/mysql-8.4",
+     "file": "mysql-8.4.4-winx64.zip",
+     "bytes": 259589246
     }
    }
   },
@@ -357,6 +422,11 @@
      "path": "archives/mysql-8.4",
      "file": "mysql-8.4.3-linux-glibc2.28-aarch64.tar.xz",
      "bytes": 897844816
+    },
+    "win-x86_64": {
+     "path": "archives/mysql-8.4",
+     "file": "mysql-8.4.3-winx64.zip",
+     "bytes": 259751071
     }
    }
   },
@@ -383,6 +453,11 @@
      "path": "archives/mysql-8.4",
      "file": "mysql-8.4.2-linux-glibc2.28-aarch64.tar.xz",
      "bytes": 476172896
+    },
+    "win-x86_64": {
+     "path": "archives/mysql-8.4",
+     "file": "mysql-8.4.2-winx64.zip",
+     "bytes": 259481874
     }
    }
   },
@@ -409,6 +484,11 @@
      "path": "Downloads/MySQL-8.4",
      "file": "mysql-8.4.0-linux-glibc2.28-aarch64.tar.xz",
      "bytes": 475245356
+    },
+    "win-x86_64": {
+     "path": "Downloads/MySQL-8.4",
+     "file": "mysql-8.4.0-winx64.zip",
+     "bytes": 258946761
     }
    }
   },
@@ -435,6 +515,11 @@
      "path": "Downloads/MySQL-8.0",
      "file": "mysql-8.0.46-linux-glibc2.28-aarch64.tar.xz",
      "bytes": 880055484
+    },
+    "win-x86_64": {
+     "path": "Downloads/MySQL-8.0",
+     "file": "mysql-8.0.46-winx64.zip",
+     "bytes": 248009349
     }
    }
   },
@@ -461,6 +546,11 @@
      "path": "Downloads/MySQL-8.0",
      "file": "mysql-8.0.45-linux-glibc2.28-aarch64.tar.xz",
      "bytes": 878432716
+    },
+    "win-x86_64": {
+     "path": "Downloads/MySQL-8.0",
+     "file": "mysql-8.0.45-winx64.zip",
+     "bytes": 244914394
     }
    }
   },
@@ -487,6 +577,11 @@
      "path": "Downloads/MySQL-8.0",
      "file": "mysql-8.0.44-linux-glibc2.28-aarch64.tar.xz",
      "bytes": 878284688
+    },
+    "win-x86_64": {
+     "path": "Downloads/MySQL-8.0",
+     "file": "mysql-8.0.44-winx64.zip",
+     "bytes": 244529072
     }
    }
   },
@@ -513,6 +608,11 @@
      "path": "archives/mysql-8.0",
      "file": "mysql-8.0.43-linux-glibc2.28-aarch64.tar.xz",
      "bytes": 877440604
+    },
+    "win-x86_64": {
+     "path": "archives/mysql-8.0",
+     "file": "mysql-8.0.43-winx64.zip",
+     "bytes": 244242563
     }
    }
   },
@@ -539,6 +639,11 @@
      "path": "archives/mysql-8.0",
      "file": "mysql-8.0.42-linux-glibc2.28-aarch64.tar.xz",
      "bytes": 875722444
+    },
+    "win-x86_64": {
+     "path": "archives/mysql-8.0",
+     "file": "mysql-8.0.42-winx64.zip",
+     "bytes": 244862139
     }
    }
   },
@@ -565,6 +670,11 @@
      "path": "archives/mysql-8.0",
      "file": "mysql-8.0.41-linux-glibc2.28-aarch64.tar.xz",
      "bytes": 866995520
+    },
+    "win-x86_64": {
+     "path": "archives/mysql-8.0",
+     "file": "mysql-8.0.41-winx64.zip",
+     "bytes": 243725417
     }
    }
   },
@@ -591,6 +701,11 @@
      "path": "archives/mysql-8.0",
      "file": "mysql-8.0.40-linux-glibc2.28-aarch64.tar.xz",
      "bytes": 865953364
+    },
+    "win-x86_64": {
+     "path": "archives/mysql-8.0",
+     "file": "mysql-8.0.40-winx64.zip",
+     "bytes": 243740050
     }
    }
   },
@@ -617,6 +732,11 @@
      "path": "archives/mysql-8.0",
      "file": "mysql-8.0.39-linux-glibc2.28-aarch64.tar.xz",
      "bytes": 456536988
+    },
+    "win-x86_64": {
+     "path": "archives/mysql-8.0",
+     "file": "mysql-8.0.39-winx64.zip",
+     "bytes": 243920091
     }
    }
   },
@@ -643,6 +763,11 @@
      "path": "Downloads/MySQL-8.0",
      "file": "mysql-8.0.37-linux-glibc2.28-aarch64.tar.xz",
      "bytes": 455746980
+    },
+    "win-x86_64": {
+     "path": "Downloads/MySQL-8.0",
+     "file": "mysql-8.0.37-winx64.zip",
+     "bytes": 242718064
     }
    }
   },
@@ -669,6 +794,11 @@
      "path": "archives/mysql-8.0",
      "file": "mysql-8.0.36-linux-glibc2.28-aarch64.tar.xz",
      "bytes": 452371120
+    },
+    "win-x86_64": {
+     "path": "archives/mysql-8.0",
+     "file": "mysql-8.0.36-winx64.zip",
+     "bytes": 243592163
     }
    }
   },
@@ -695,6 +825,11 @@
      "path": "archives/mysql-8.0",
      "file": "mysql-8.0.35-linux-glibc2.28-aarch64.tar.xz",
      "bytes": 452183452
+    },
+    "win-x86_64": {
+     "path": "archives/mysql-8.0",
+     "file": "mysql-8.0.35-winx64.zip",
+     "bytes": 243442097
     }
    }
   },
@@ -716,6 +851,11 @@
      "path": "archives/mysql-8.0",
      "file": "mysql-8.0.34-linux-glibc2.17-x86_64-minimal.tar.xz",
      "bytes": 60558812
+    },
+    "win-x86_64": {
+     "path": "archives/mysql-8.0",
+     "file": "mysql-8.0.34-winx64.zip",
+     "bytes": 242938202
     }
    }
   },
@@ -737,6 +877,11 @@
      "path": "archives/mysql-8.0",
      "file": "mysql-8.0.33-linux-glibc2.17-x86_64-minimal.tar.xz",
      "bytes": 60181648
+    },
+    "win-x86_64": {
+     "path": "archives/mysql-8.0",
+     "file": "mysql-8.0.33-winx64.zip",
+     "bytes": 241261234
     }
    }
   },
@@ -758,6 +903,11 @@
      "path": "archives/mysql-8.0",
      "file": "mysql-8.0.32-linux-glibc2.17-x86_64-minimal.tar.xz",
      "bytes": 60201944
+    },
+    "win-x86_64": {
+     "path": "archives/mysql-8.0",
+     "file": "mysql-8.0.32-winx64.zip",
+     "bytes": 234513258
     }
    }
   },
@@ -779,6 +929,11 @@
      "path": "archives/mysql-8.0",
      "file": "mysql-8.0.31-linux-glibc2.17-x86_64-minimal.tar.xz",
      "bytes": 60148296
+    },
+    "win-x86_64": {
+     "path": "archives/mysql-8.0",
+     "file": "mysql-8.0.31-winx64.zip",
+     "bytes": 233117607
     }
    }
   },
@@ -800,6 +955,11 @@
      "path": "archives/mysql-8.0",
      "file": "mysql-8.0.30-linux-glibc2.17-x86_64-minimal.tar.xz",
      "bytes": 55042240
+    },
+    "win-x86_64": {
+     "path": "archives/mysql-8.0",
+     "file": "mysql-8.0.30-winx64.zip",
+     "bytes": 226363319
     }
    }
   }

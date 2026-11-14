@@ -1,0 +1,108 @@
+name: E2E Windows
+
+# Testes ponta a ponta no Windows: baixam PHP, Caddy, MySQL, PostgreSQL e Redis de verdade
+# e sobem um projeto. Rodam na branch `windows` (e manualmente) porque são pesados.
+on:
+  workflow_dispatch:
+  push:
+    branches: [windows]
+    paths: ["src-tauri/**", ".github/workflows/e2e-windows.yml"]
+
+concurrency:
+  group: e2e-windows
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: Pilha no Windows
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Instalar dependências do front-end
+        run: pnpm install --frozen-lockfile
+
+      # O Tauri exige a pasta dist/ para compilar o back-end.
+      - name: Front-end (tipos + build)
+        run: pnpm build
+
+      # O TEMP do runner é um nome curto 8.3 (C:\Users\RUNNER~1\...), que o php-cgi
+      # trunca ao abrir o script. Os testes usam um TEMP limpo, sem "~".
+      - name: Preparar TEMP limpo
+        run: New-Item -ItemType Directory -Force C:\ltt\tmp | Out-Null
+
+      - name: Projeto MySQL de ponta a ponta (Caddy + PHP + MySQL)
+        working-directory: src-tauri
+        env:
+          TEMP: C:\ltt\tmp
+          TMP: C:\ltt\tmp
+        run: cargo test --locked --lib runtime::tests::start_serve_stop -- --ignored --nocapture
+
+      # O PostgreSQL se recusa a rodar com privilégios de administrador, e o usuário do
+      # runner é admin. Compilamos como admin e rodamos o teste como usuário comum
+      # (no uso real o app roda sem elevar, como qualquer app com UAC).
+      - name: Projeto PostgreSQL + Redis de ponta a ponta
+        timeout-minutes: 18
+        working-directory: src-tauri
+        env:
+          TEMP: C:\ltt\tmp
+          TMP: C:\ltt\tmp
+        run: |
+          $exePath = cargo test --locked --lib --no-run --message-format json | ConvertFrom-Json | Where-Object { $_.executable } | Select-Object -Last 1 -ExpandProperty executable
+          $exe = Get-Item $exePath
+          Write-Host "binário de teste: $($exe.FullName)"
+          net user lttest "Ltt#pass123" /add | Out-Null
+          icacls target /grant "lttest:(OI)(CI)M" /T /Q | Out-Null
+          icacls C:\ltt /grant "lttest:(OI)(CI)M" /T /Q | Out-Null
+          $sec = ConvertTo-SecureString "Ltt#pass123" -AsPlainText -Force
+          $cred = [System.Management.Automation.PSCredential]::new("lttest", $sec)
+          $inner = "`$env:TEMP='C:\ltt\tmp'; `$env:TMP='C:\ltt\tmp'; & '$($exe.FullName)' runtime::tests::postgres_redis_end_to_end --ignored --nocapture; exit `$LASTEXITCODE"
+          # Sem -Wait: no PowerShell 7 ele espera a árvore inteira, e os serviços que o
+          # teste deixa no ar (quando falha) segurariam o passo até o timeout.
+          $proc = Start-Process powershell -Credential $cred -WorkingDirectory $PWD -ArgumentList @('-NoProfile', '-Command', $inner) -PassThru -NoNewWindow -RedirectStandardOutput C:\ltt\pg-out.txt -RedirectStandardError C:\ltt\pg-err.txt
+          $deadline = (Get-Date).AddMinutes(15)
+          while (-not $proc.HasExited -and (Get-Date) -lt $deadline) { Start-Sleep 5 }
+          if (-not $proc.HasExited) { $proc.Kill(); Write-Host "teste estourou 15 minutos"; exit 124 }
+          Get-Content C:\ltt\pg-out.txt, C:\ltt\pg-err.txt -ErrorAction SilentlyContinue
+          exit $proc.ExitCode
+
+      - name: Diagnóstico do redis-server (em caso de falha)
+        if: failure()
+        run: |
+          $server = Get-ChildItem C:\ltt\tmp -Recurse -Filter redis-server.exe | Select-Object -First 1
+          $conf = Get-ChildItem C:\ltt\tmp -Recurse -Filter valkey.conf | Select-Object -First 1
+          Write-Host "redis-server: $($server.FullName)"
+          Write-Host "config real: $($conf.FullName)"
+          Get-Content $conf.FullName
+          $fwd = $conf.FullName -replace '\\', '/'
+          Write-Host "--- como lttest, config com barras normais ($fwd):"
+          $sec = ConvertTo-SecureString "Ltt#pass123" -AsPlainText -Force
+          $cred = [System.Management.Automation.PSCredential]::new("lttest", $sec)
+          $inner = "& '$($server.FullName)' '$fwd'; exit `$LASTEXITCODE"
+          $p2 = Start-Process powershell -Credential $cred -ArgumentList @('-NoProfile', '-Command', $inner) -PassThru -NoNewWindow -RedirectStandardOutput C:\ltt\probe-user.out -RedirectStandardError C:\ltt\probe-user.err
+          if (-not $p2.WaitForExit(6000)) { $p2.Kill(); Write-Host "(seguiu no ar: ok)" } else { Write-Host "exit=$($p2.ExitCode)" }
+          Get-Content C:\ltt\probe-user.out, C:\ltt\probe-user.err -ErrorAction SilentlyContinue
+
+      - name: Logs dos projetos (em caso de falha)
+        if: failure()
+        run: |
+          Write-Host "===== saída do teste (pg-out.txt)"
+          Get-Content C:\ltt\pg-out.txt -Tail 80 -ErrorAction SilentlyContinue
+          Get-Content C:\ltt\pg-err.txt -Tail 20 -ErrorAction SilentlyContinue
+          Get-ChildItem C:\ltt\tmp -Recurse -Filter *.log | ForEach-Object { Write-Host "===== $($_.FullName)"; Get-Content $_.FullName -Tail 30 }
