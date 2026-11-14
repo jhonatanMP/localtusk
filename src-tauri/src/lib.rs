@@ -5,6 +5,7 @@ mod codemap;
 mod commands;
 mod download;
 mod extras;
+mod local_import;
 mod mysql_manager;
 mod php_manager;
 mod postgres_manager;
@@ -55,6 +56,9 @@ pub fn run() {
             commands::set_php_version,
             commands::set_https,
             commands::set_lan,
+            commands::set_auto_login,
+            commands::list_wp_admins,
+            commands::open_wp_admin,
             commands::ssl_status,
             commands::trust_certificate,
             commands::reveal_ca,
@@ -92,6 +96,9 @@ pub fn run() {
             commands::import_blueprint,
             commands::export_blueprint,
             commands::open_blueprints_dir,
+            commands::list_local_sites,
+            commands::check_local_site,
+            commands::import_local_site,
             commands::list_mysql_versions,
             commands::mysql_catalog,
             commands::install_mysql,

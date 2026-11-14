@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ExtraStatus, InstallProgress, Project, api } from "./api";
 import { ProgressView, isBusy } from "./PhpManager";
-import { Copyable, Icon } from "./ui";
+import { Copyable, Icon, Switch } from "./ui";
 
 function errMsg(e: unknown) {
   return typeof e === "string" ? e : e instanceof Error ? e.message : String(e);
@@ -48,6 +48,9 @@ export default function WordPressPanel(props: {
   const [submitting, setSubmitting] = useState(false);
   const [created, setCreated] = useState<Credentials | null>(null);
   const [terminalBusy, setTerminalBusy] = useState(false);
+  const [admins, setAdmins] = useState<string[]>([]);
+  const [loginBusy, setLoginBusy] = useState(false);
+  const [adminBusy, setAdminBusy] = useState(false);
   const busy = submitting || isBusy(progress);
   // Se a pasta pública tem arquivos que não são do WordPress, eles serão apagados.
   const willWipe = p.docrootInUse;
@@ -64,6 +67,55 @@ export default function WordPressPanel(props: {
     } finally {
       setSubmitting(false);
       props.onChanged();
+    }
+  }
+
+  useEffect(() => {
+    setAdmins([]);
+    if (!p.running || !p.hasWordpress) return;
+    let alive = true;
+    api
+      .listWpAdmins(p.id)
+      .then((list) => alive && setAdmins(list))
+      .catch((e) => {
+        if (alive) {
+          setAdmins([]);
+          props.onError(errMsg(e));
+        }
+      });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p.id, p.running, p.hasWordpress]);
+
+  // Parado: só o usuário salvo. Rodando: a lista de administradores (mais o salvo, se saiu dela).
+  const options = p.running ? (p.autoLoginUser && !admins.includes(p.autoLoginUser) ? [p.autoLoginUser, ...admins] : admins) : p.autoLoginUser ? [p.autoLoginUser] : [];
+  const canChoose = p.running ? admins.length > 0 : !!p.autoLoginUser;
+  const selectedUser = p.autoLoginUser || options[0] || "";
+
+  async function saveAutoLogin(enabled: boolean, who: string) {
+    if (enabled && !who) return;
+    setLoginBusy(true);
+    try {
+      await api.setAutoLogin(p.id, enabled, who);
+    } catch (err) {
+      props.onError(errMsg(err));
+    } finally {
+      setLoginBusy(false);
+      props.onChanged();
+    }
+  }
+
+  async function openWpAdmin() {
+    setAdminBusy(true);
+    try {
+      const msg = await api.openWpAdmin(p.id);
+      if (msg) props.onError(msg);
+    } catch (err) {
+      props.onError(errMsg(err));
+    } finally {
+      setAdminBusy(false);
     }
   }
 
@@ -99,10 +151,10 @@ export default function WordPressPanel(props: {
             <div className="row">
               <button
                 className="btn small primary"
-                disabled={!p.running}
-                onClick={() => api.openSite(p.id, "/wp-admin/").catch((e) => props.onError(errMsg(e)))}
+                disabled={!p.running || adminBusy}
+                onClick={openWpAdmin}
               >
-                <Icon name="external" size={13} /> wp-admin
+                <Icon name="external" size={13} /> {adminBusy ? "Abrindo…" : "wp-admin"}
               </button>
               <button
                 className="btn small"
@@ -111,6 +163,31 @@ export default function WordPressPanel(props: {
               >
                 <Icon name="external" size={13} /> Site
               </button>
+            </div>
+            <div className="row">
+              <label className="check inline">
+                <Switch
+                  label="Login automático no wp-admin"
+                  checked={p.autoLogin}
+                  disabled={loginBusy || (!p.autoLogin && !canChoose)}
+                  onChange={(next) => saveAutoLogin(next, selectedUser)}
+                />
+                Login automático no wp-admin
+              </label>
+              <label className="check inline">
+                Usuário
+                <select
+                  value={selectedUser}
+                  disabled={!p.running || !p.autoLogin || loginBusy || options.length === 0}
+                  onChange={(e) => saveAutoLogin(true, e.target.value)}
+                >
+                  {options.map((u) => (
+                    <option key={u} value={u}>
+                      {u}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
             {!p.running && <p className="hint">Inicie o projeto para acessar o WordPress.</p>}
           </>

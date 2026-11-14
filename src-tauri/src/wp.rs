@@ -110,6 +110,23 @@ pub fn retarget(base: &Path, p: &Project, progress: &dyn Fn(InstallProgress)) ->
     Ok(())
 }
 
+/// Troca um texto por outro em todas as tabelas do banco do WordPress (`wp search-replace`,
+/// que respeita dados serializados). Usado para trocar o caminho antigo de um site importado.
+pub fn search_replace_all(
+    base: &Path,
+    p: &Project,
+    old: &str,
+    new: &str,
+    progress: &dyn Fn(InstallProgress),
+) -> Result<(), String> {
+    let php = php_cli(base, p, progress)?;
+    if extras::wpcli_phar(base).is_none() {
+        extras::install(base, "wpcli", progress)?;
+    }
+    let cmd = wp_command(base, p, &php, &["search-replace", old, new, "--all-tables"])?;
+    run_logged(base, p, "wp search-replace (caminho)", cmd, Duration::from_secs(600))
+}
+
 /// Escapa um texto para uso entre aspas simples em scripts de shell.
 fn sh_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
@@ -673,9 +690,225 @@ fn write_exec(path: &Path, content: &str) -> Result<(), String> {
     Ok(())
 }
 
+// -------------------------------------------------------------- Login automático
+
+/// Parâmetro da URL que carrega o código de uso único.
+pub const LOGIN_PARAM: &str = "localtusk-login";
+
+const LOGIN_PLUGIN_FILE: &str = "localtusk-login.php";
+
+/// mu-plugin que troca o código de uso único por uma sessão de administrador.
+const LOGIN_PLUGIN_PHP: &str = r#"<?php
+/**
+ * Plugin Name: LocalTusk - login automático
+ * Description: Entra no wp-admin com um código de uso único gerado pelo LocalTusk.
+ */
+add_action('init', function () {
+    if (!isset($_GET['localtusk-login'])) {
+        return;
+    }
+    if (!is_string($_GET['localtusk-login'])) {
+        wp_safe_redirect(wp_login_url());
+        exit;
+    }
+    $token = $_GET['localtusk-login'];
+    $key = 'localtusk_login_' . hash('sha256', $token);
+    $login = get_transient($key);
+    delete_transient($key);
+    if (is_string($login) && $login !== '') {
+        $u = get_user_by('login', $login);
+        if ($u && user_can($u, 'manage_options')) {
+            wp_set_current_user($u->ID);
+            wp_set_auth_cookie($u->ID, false, is_ssl());
+            wp_safe_redirect(admin_url());
+            exit;
+        }
+    }
+    wp_safe_redirect(wp_login_url());
+    exit;
+}, 1);
+"#;
+
+/// Nome do transient que guarda o usuário do código (o código em si nunca é gravado).
+pub(crate) fn login_token_key(token: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let hash: String = Sha256::digest(token.as_bytes()).iter().map(|b| format!("{b:02x}")).collect();
+    format!("localtusk_login_{hash}")
+}
+
+/// 32 bytes aleatórios do sistema (gerador seguro do SO, em qualquer plataforma), em
+/// hexadecimal. Sem alternativa se a leitura falhar.
+fn random_token() -> Result<String, String> {
+    let mut buf = [0u8; 32];
+    getrandom::fill(&mut buf).map_err(|e| format!("Não foi possível gerar o código de login: {e}"))?;
+    Ok(buf.iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// Roda o WP-CLI e devolve o que ele escreveu na saída padrão (o erro vai para o log).
+fn wp_output(base: &Path, p: &Project, args: &[&str], timeout: Duration) -> Result<String, String> {
+    let php = php_cli(base, p, &|_| {})?;
+    let mut cmd = wp_command(base, p, &php, args)?;
+    let logs = project::project_dir(base, &p.id).join("logs");
+    fs::create_dir_all(&logs).map_err(|e| e.to_string())?;
+    let log_path = logs.join(LOG);
+    let mut log = OpenOptions::new().create(true).append(true).open(&log_path).map_err(|e| e.to_string())?;
+    let label = format!("wp {}", args.first().copied().unwrap_or(""));
+    let _ = writeln!(log, "\n$ {label}");
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let out_path = logs.join(format!(
+        "wp-cli.{}.{}.out.tmp",
+        std::process::id(),
+        SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    let out_file = fs::File::create(&out_path).map_err(|e| e.to_string())?;
+    cmd.stdin(Stdio::null()).stdout(Stdio::from(out_file)).stderr(Stdio::from(log));
+    let result = (|| {
+        let mut child = cmd.spawn().map_err(|e| format!("{label}: {e}"))?;
+        let start = Instant::now();
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) if status.success() => return Ok(()),
+                Ok(Some(status)) => return Err(format!("{label} falhou ({status})\n\n{}", last_output(&log_path))),
+                Ok(None) if start.elapsed() > timeout => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!("{label}: demorou demais e foi cancelado"));
+                }
+                Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+                Err(e) => return Err(format!("{label}: {e}")),
+            }
+        }
+    })();
+    let text = fs::read_to_string(&out_path).unwrap_or_default();
+    let _ = fs::remove_file(&out_path);
+    result.map(|_| text)
+}
+
+/// Logins dos administradores do site, na ordem do WP-CLI.
+pub fn admin_users(base: &Path, p: &Project) -> Result<Vec<String>, String> {
+    let out = wp_output(
+        base,
+        p,
+        &["user", "list", "--role=administrator", "--field=user_login"],
+        Duration::from_secs(60),
+    )?;
+    Ok(out.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect())
+}
+
+/// Escolhe a pasta dos mu-plugins: a do WordPress só vale se estiver dentro de uma das
+/// pastas permitidas (o `wp-config.php` pode apontá-la para fora do projeto).
+fn choose_mu_dir(resolved: Option<PathBuf>, allowed: &[PathBuf], default: PathBuf) -> PathBuf {
+    let canon_allowed: Vec<PathBuf> = allowed.iter().filter_map(|a| a.canonicalize().ok()).collect();
+    if let Some(dir) = resolved {
+        // A pasta pode ainda não existir: valida o ancestral existente mais próximo.
+        let mut probe = dir.as_path();
+        loop {
+            if let Ok(c) = probe.canonicalize() {
+                let rest = dir.strip_prefix(probe).unwrap_or(Path::new(""));
+                let full = c.join(rest);
+                let clean = !rest.components().any(|c| matches!(c, std::path::Component::ParentDir));
+                if clean && canon_allowed.iter().any(|a| full.starts_with(a)) {
+                    return dir;
+                }
+                break;
+            }
+            match probe.parent() {
+                Some(par) => probe = par,
+                None => break,
+            }
+        }
+    }
+    default
+}
+
+/// Pasta dos mu-plugins: a que o WordPress usa (se for do projeto); senão, a padrão.
+fn mu_plugins_dir(base: &Path, p: &Project) -> PathBuf {
+    let docroot = runtime::docroot_dir(base, p);
+    let default = docroot.join("wp-content").join("mu-plugins");
+    let resolved = wp_output(base, p, &["eval", "echo WPMU_PLUGIN_DIR;"], Duration::from_secs(30))
+        .ok()
+        .and_then(|o| o.lines().map(str::trim).rfind(|l| l.starts_with('/')).map(PathBuf::from));
+    choose_mu_dir(resolved, &[docroot, project::project_dir(base, &p.id)], default)
+}
+
+/// Grava o mu-plugin de login automático (sobrescreve; pode ser repetido).
+pub fn install_login_plugin(base: &Path, p: &Project) -> Result<(), String> {
+    let dir = mu_plugins_dir(base, p);
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    fs::write(dir.join(LOGIN_PLUGIN_FILE), LOGIN_PLUGIN_PHP).map_err(|e| e.to_string())
+}
+
+/// Apaga o mu-plugin, se existir, da pasta que o WordPress usa e da padrão.
+/// Funciona com o projeto parado (aí só a pasta padrão é conhecida).
+pub fn remove_login_plugin(base: &Path, p: &Project) -> Result<(), String> {
+    let default = runtime::docroot_dir(base, p).join("wp-content").join("mu-plugins");
+    let mut dirs = vec![mu_plugins_dir(base, p)];
+    if !dirs.contains(&default) {
+        dirs.push(default);
+    }
+    for dir in dirs {
+        match fs::remove_file(dir.join(LOGIN_PLUGIN_FILE)) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    Ok(())
+}
+
+/// Gera um código de uso único para `user` (vale 60 s) e o guarda no banco do site.
+pub fn create_login_token(base: &Path, p: &Project, user: &str) -> Result<String, String> {
+    let token = random_token()?;
+    let key = login_token_key(&token);
+    wp_output(base, p, &["transient", "set", &key, user, "60"], Duration::from_secs(60))?;
+    Ok(token)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pasta_do_mu_plugin_fica_dentro_do_projeto() {
+        let root = std::env::temp_dir().join(format!("lt-mu-{}", std::process::id()));
+        let docroot = root.join("proj/public");
+        fs::create_dir_all(docroot.join("wp-content")).unwrap();
+        let default = docroot.join("wp-content/mu-plugins");
+        let allowed = vec![docroot.clone()];
+        // Dentro do projeto (mesmo sem existir ainda): aceita.
+        assert_eq!(choose_mu_dir(Some(default.clone()), &allowed, default.clone()), default);
+        let custom = docroot.join("extra/mu");
+        assert_eq!(choose_mu_dir(Some(custom.clone()), &allowed, default.clone()), custom);
+        // Fora do projeto, com `..` ou sem resposta: usa a padrão.
+        assert_eq!(choose_mu_dir(Some(root.join("outro/mu")), &allowed, default.clone()), default);
+        assert_eq!(choose_mu_dir(Some(docroot.join("../../fora")), &allowed, default.clone()), default);
+        assert_eq!(choose_mu_dir(Some("/etc/mu".into()), &allowed, default.clone()), default);
+        assert_eq!(choose_mu_dir(None, &allowed, default.clone()), default);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn login_token_key_usa_hash() {
+        let k = login_token_key("abc");
+        assert_eq!(k, "localtusk_login_ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    }
+
+    #[test]
+    fn codigo_aleatorio_tem_64_hex_e_muda() {
+        let a = random_token().unwrap();
+        let b = random_token().unwrap();
+        assert_eq!(a.len(), 64);
+        assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn plugin_confere_usuario_e_uso_unico() {
+        // O PHP do mu-plugin tem as peças que garantem a segurança.
+        for s in ["localtusk-login", "localtusk_login_", "hash('sha256'", "delete_transient", "manage_options", "wp_set_auth_cookie", "wp_login_url()", "is_string("] {
+            assert!(LOGIN_PLUGIN_PHP.contains(s), "falta {s}");
+        }
+    }
 
     #[test]
     fn terminais_do_linux_recebem_o_script_e_respeitam_o_terminal_da_pessoa() {

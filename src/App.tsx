@@ -5,6 +5,7 @@ import ApiTools from "./ApiTools";
 import BackupPanel, { pickBackupFile } from "./Backup";
 import BlueprintsView, { SaveBlueprintPanel } from "./Blueprint";
 import { askConfirm } from "./confirm";
+import LocalImport from "./LocalImport";
 import {
   BlueprintInfo,
   DbEngine,
@@ -41,7 +42,7 @@ export default function App() {
   const lastProjects = useRef("");
   const mainRef = useRef<HTMLElement>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [view, setView] = useState<"project" | "new" | "php" | "blueprints">("project");
+  const [view, setView] = useState<"project" | "new" | "php" | "blueprints" | "local-import">("project");
   const [tools, setTools] = useState<ToolStatus[]>([]);
   const [phps, setPhps] = useState<PhpInstall[]>([]);
   const [mysqls, setMysqls] = useState<MysqlInstall[]>([]);
@@ -53,7 +54,7 @@ export default function App() {
   const [backupsDir, setBackupsDir] = useState("");
   const [blueprintsDir, setBlueprintsDir] = useState("");
   /** Criando um projeto novo a partir de um backup ou de um blueprint. */
-  const [restoringNew, setRestoringNew] = useState<null | "backup" | "blueprint">(null);
+  const [restoringNew, setRestoringNew] = useState<null | "backup" | "blueprint" | "local">(null);
 
   const loadPhps = useCallback(() => {
     api.listPhpVersions().then(setPhps);
@@ -161,6 +162,23 @@ export default function App() {
     }
   }
 
+  /** Importa um site do Local e abre o projeto criado. */
+  async function importFromLocal(id: string, name: string, phpSeries: string, mysqlSeries: string) {
+    try {
+      setRestoringNew("local");
+      const r = await api.importLocalSite(id, name, phpSeries, mysqlSeries);
+      await refresh();
+      setSelectedId(r.project.id);
+      setView("project");
+      if (r.warning) setError(r.warning);
+    } catch (e) {
+      setError(errMsg(e));
+    } finally {
+      setRestoringNew(null);
+      refresh();
+    }
+  }
+
   const caddyReady = extras.find((x) => x.id === "caddy")?.installed ?? false;
 
   return (
@@ -239,12 +257,14 @@ export default function App() {
           )}
           {restoringNew && (
             <div className="banner" role="status">
-              <Icon name={restoringNew === "blueprint" ? "blueprint" : "restore"} />
+              <Icon name={restoringNew === "blueprint" ? "blueprint" : restoringNew === "local" ? "download" : "restore"} />
               <div className="grow">
                 <strong>
                   {restoringNew === "blueprint"
                     ? "Criando o projeto a partir do blueprint…"
-                    : "Restaurando o backup em um novo projeto…"}
+                    : restoringNew === "local"
+                      ? "Importando o site do Local…"
+                      : "Restaurando o backup em um novo projeto…"}
                 </strong>
                 {restoreProgress && <ProgressView p={restoreProgress} />}
               </div>
@@ -277,6 +297,15 @@ export default function App() {
               onCreate={createFromBlueprint}
               onError={setError}
             />
+          ) : view === "local-import" ? (
+            <LocalImport
+              progress={progress}
+              importing={restoringNew !== null}
+              onImport={importFromLocal}
+              onInstalled={loadPhps}
+              onBack={() => setView("new")}
+              onError={setError}
+            />
           ) : view === "new" ? (
             <NewProject
               phps={phps}
@@ -285,6 +314,7 @@ export default function App() {
               valkeys={valkeys}
               onManagePhp={() => setView("php")}
               onBlueprints={() => setView("blueprints")}
+              onLocalImport={() => setView("local-import")}
               onCancel={() => setView("project")}
               onCreated={async (p) => {
                 await refresh();
@@ -377,6 +407,7 @@ function NewProject(props: {
   onManagePhp: () => void;
   onBlueprints: () => void;
   onCancel: () => void;
+  onLocalImport: () => void;
   onCreated: (p: Project) => void;
   onError: (m: string) => void;
 }) {
@@ -409,6 +440,10 @@ function NewProject(props: {
             Escolha as versões e o LocalTusk cuida do resto. Prefere partir de um modelo?{" "}
             <button type="button" className="link" onClick={props.onBlueprints}>
               Usar um blueprint
+            </button>{" "}
+            ou{" "}
+            <button type="button" className="link" onClick={props.onLocalImport}>
+              Importar do Local
             </button>
           </div>
         </div>

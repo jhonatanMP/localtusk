@@ -1552,13 +1552,13 @@ echo 'ext=' . (extension_loaded('pdo_pgsql') ? 'pdo_pgsql' : 'sem') . "\n";
         let manifest = crate::backup::read_manifest(&archive).unwrap();
         assert_eq!(manifest.db_engine, "postgres");
         psql(&pg.tool("psql").unwrap(), db, "pgredis", "DROP TABLE notas").expect("drop");
-        crate::backup::restore_into(&base, &p, &archive, "restore-teste", &|_| {}).expect("restore");
+        crate::backup::restore_into(&base, &p, crate::backup::RestoreSource::Archive(&archive), "restore-teste", &|_| {}).expect("restore");
         // restore_into apaga a pasta app/ e traz a do backup de volta (com o index.php do teste).
         let body = http_get(http);
         assert!(body.contains("notas=primeira"), "dados não voltaram do backup: {body}");
         // Um backup de PostgreSQL não entra num projeto MySQL.
         let mysql_twin = Project { db_engine: String::new(), ..p.clone() };
-        let err = crate::backup::restore_into(&base, &mysql_twin, &archive, "x", &|_| {}).unwrap_err();
+        let err = crate::backup::restore_into(&base, &mysql_twin, crate::backup::RestoreSource::Archive(&archive), "x", &|_| {}).unwrap_err();
         assert!(err.contains("PostgreSQL") && err.contains("MySQL"), "{err}");
 
         // --- Terminal: atalhos já ligados ao banco e ao Redis ---
@@ -1770,7 +1770,7 @@ echo 'ext=' . (extension_loaded('pdo_pgsql') ? 'pdo_pgsql' : 'sem') . "\n";
         };
         scaffold(&base, &p2).unwrap();
         let mut running2 = start(&base, &p2).expect("start do projeto restaurado");
-        let warning = crate::backup::restore_into(&base, &p2, &archive, "bk", &show).expect("restore");
+        let warning = crate::backup::restore_into(&base, &p2, crate::backup::RestoreSource::Archive(&archive), "bk", &show).expect("restore");
         assert!(warning.is_none(), "aviso inesperado: {warning:?}");
 
         let host2 = format!("Host: {}:{http2}\r\n", project::site_host(&p2));
@@ -1791,6 +1791,359 @@ echo 'ext=' . (extension_loaded('pdo_pgsql') ? 'pdo_pgsql' : 'sem') . "\n";
 
         stop(&mut running);
         let _ = fs::remove_dir_all(project::project_dir(&base, "wp"));
+    }
+
+    /// Login automático no wp-admin: código de uso único, vencido, reaproveitado e de quem não é admin.
+    /// Mesmas ferramentas (e cache) do `wordpress_end_to_end`. Rode com:
+    /// `cargo test --lib auto_login_end_to_end -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn auto_login_end_to_end() {
+        let base = std::env::temp_dir().join("localtusk-test-wp");
+        let _ = fs::remove_dir_all(project::project_dir(&base, "al"));
+        let show = |p: InstallProgress| {
+            if p.stage != "download" {
+                println!("  [{}] {} {}", p.id, p.stage, p.message.unwrap_or_default());
+            }
+        };
+        if !extras::is_installed(&base, "caddy") {
+            extras::install(&base, "caddy", &show).expect("caddy");
+        }
+        if mysql_manager::pick(&base, "8.4").is_none() {
+            let cat = mysql_manager::catalog(&base).expect("catálogo");
+            let my = cat.iter().find(|r| r.series == "8.4" && r.latest).unwrap().version.clone();
+            mysql_manager::install(&base, &my, &show).expect("mysql");
+        }
+        if crate::tools::pick_php(&base, "8.3").map(|i| !i.managed).unwrap_or(true) {
+            let cat = crate::php_manager::catalog(&base).expect("catálogo do PHP");
+            let php = cat.iter().find(|r| r.minor == "8.3" && r.latest).unwrap().version.clone();
+            crate::php_manager::install(&base, &php, &show).expect("php");
+        }
+        let http = project::free_port(18900, &Default::default()).unwrap();
+        let db = project::free_port(14200, &Default::default()).unwrap();
+        let p = Project {
+            id: "al".into(),
+            name: "Login".into(),
+            docroot: "".into(),
+            php_version: "8.3".into(),
+            db_version: "8.4".into(),
+            http_port: http,
+            db_port: db,
+            db_name: "al".into(),
+            created_at: 0,
+            ..Default::default()
+        };
+        scaffold(&base, &p).unwrap();
+        let mut running = start(&base, &p).expect("start falhou");
+        let opts = crate::wp::WpOptions {
+            title: "Blog Login".into(),
+            admin_user: "admin".into(),
+            admin_password: "SenhaForte123".into(),
+            admin_email: "admin@example.com".into(),
+            locale: "en_US".into(),
+            replace_existing: true,
+        };
+        crate::wp::install_wordpress(&base, &p, &opts, &show).expect("install_wordpress");
+
+        assert_eq!(crate::wp::admin_users(&base, &p).unwrap(), vec!["admin".to_string()]);
+        crate::wp::install_login_plugin(&base, &p).unwrap();
+        crate::wp::install_login_plugin(&base, &p).expect("idempotente");
+        let plugin = docroot_dir(&base, &p).join("wp-content/mu-plugins/localtusk-login.php");
+        assert!(plugin.is_file());
+
+        let host = format!("Host: {}:{http}\r\n", project::site_host(&p));
+        let param = crate::wp::LOGIN_PARAM;
+        let visit = |token: &str| http_request(http, "GET", &format!("/wp-login.php?{param}={token}"), &host, "");
+        let location = |r: &str| r.lines().find_map(|l| l.strip_prefix("Location: ").or_else(|| l.strip_prefix("location: "))).unwrap_or("").trim().to_string();
+        let has_session = |r: &str| r.lines().any(|l| l.to_ascii_lowercase().starts_with("set-cookie: wordpress_logged_in_") && !l.contains("=deleted"));
+
+        // Código válido: entra no wp-admin.
+        let token = crate::wp::create_login_token(&base, &p, "admin").unwrap();
+        let r = visit(&token);
+        assert!(r.contains(" 302"), "{r}");
+        assert!(location(&r).ends_with("/wp-admin/"), "Location: {}", location(&r));
+        assert!(has_session(&r), "sem cookie de sessão:\n{r}");
+        let cookies: Vec<String> = r
+            .lines()
+            .filter_map(|l| l.strip_prefix("Set-Cookie: ").or_else(|| l.strip_prefix("set-cookie: ")))
+            .map(|c| c.split(';').next().unwrap().to_string())
+            .collect();
+        let admin = http_request(http, "GET", "/wp-admin/", &format!("{host}Cookie: {}\r\n", cookies.join("; ")), "");
+        assert!(admin.contains(" 200") && admin.contains("id=\"wpadminbar\""), "wp-admin não abriu logado");
+
+        // Valor que não é texto (`?localtusk-login[]=x`) também volta para o login.
+        let arr = http_request(http, "GET", &format!("/wp-login.php?{param}[]=x"), &host, "");
+        assert!(arr.contains(" 302") && location(&arr).contains("wp-login.php") && !has_session(&arr), "{arr}");
+
+        // Uso único.
+        let again = visit(&token);
+        assert!(again.contains(" 302") && location(&again).contains("wp-login.php") && !has_session(&again), "{again}");
+
+        // Código vencido.
+        let shims = crate::wp::prepare_terminal(&base, &p).expect("terminal").parent().unwrap().join("shims");
+        let wp = |args: &str| {
+            let out = Command::new("/bin/sh")
+                .arg("-c")
+                .arg(format!("cd '{}' && wp {args}", runtime_docroot(&base, &p)))
+                .env("PATH", format!("{}:/usr/bin:/bin", shims.display()))
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "wp {args}: {}", String::from_utf8_lossy(&out.stderr));
+        };
+        let old = "a".repeat(64);
+        wp(&format!("transient set {} admin 1", crate::wp::login_token_key(&old)));
+        std::thread::sleep(Duration::from_secs(2));
+        let expired = visit(&old);
+        assert!(expired.contains(" 302") && location(&expired).contains("wp-login.php") && !has_session(&expired), "{expired}");
+
+        // Quem não é administrador não entra.
+        wp("user create leitor l@x.test --role=subscriber");
+        let reader = crate::wp::create_login_token(&base, &p, "leitor").unwrap();
+        let denied = visit(&reader);
+        assert!(denied.contains(" 302") && location(&denied).contains("wp-login.php") && !has_session(&denied), "{denied}");
+
+        // Remover com o projeto rodando e parado.
+        crate::wp::remove_login_plugin(&base, &p).unwrap();
+        assert!(!plugin.exists(), "plugin ficou após remover");
+        crate::wp::install_login_plugin(&base, &p).unwrap();
+        assert!(plugin.is_file());
+        stop(&mut running);
+        crate::wp::remove_login_plugin(&base, &p).unwrap();
+        assert!(!plugin.exists());
+        crate::wp::remove_login_plugin(&base, &p).expect("sem arquivo também é ok");
+        let _ = fs::remove_dir_all(project::project_dir(&base, "al"));
+    }
+
+    /// Lista (caminho relativo, é link?) de tudo dentro de `dir`, sem seguir links.
+    fn snapshot_tree(dir: &Path) -> Vec<(String, bool)> {
+        fn walk(root: &Path, dir: &Path, out: &mut Vec<(String, bool)>) {
+            for e in fs::read_dir(dir).unwrap().flatten() {
+                let path = e.path();
+                let meta = fs::symlink_metadata(&path).unwrap();
+                let rel = path.strip_prefix(root).unwrap().display().to_string();
+                out.push((rel, meta.file_type().is_symlink()));
+                if meta.is_dir() {
+                    walk(root, &path, out);
+                }
+            }
+        }
+        let mut out = vec![];
+        walk(dir, dir, &mut out);
+        out.sort();
+        out
+    }
+
+    /// Restauração a partir de uma pasta "do Local" (app/public + app/sql/local.sql): o site
+    /// abre no endereço do projeto novo e a pasta de origem não é alterada.
+    /// Usa as mesmas ferramentas (e o mesmo cache) do `wordpress_end_to_end`. Rode com:
+    /// `cargo test --lib local_folder_restore_end_to_end -- --ignored --nocapture`
+    #[cfg(unix)]
+    #[test]
+    #[ignore]
+    fn local_folder_restore_end_to_end() {
+        use crate::backup::RestoreSource;
+        let base = std::env::temp_dir().join("localtusk-test-wp");
+        let local = std::env::temp_dir().join("localtusk-test-localsite");
+        let _ = fs::remove_dir_all(project::project_dir(&base, "lfsrc"));
+        let _ = fs::remove_dir_all(project::project_dir(&base, "lf"));
+        let _ = fs::remove_dir_all(&local);
+        let show = |p: InstallProgress| {
+            if p.stage != "download" {
+                println!("  [{}] {} {}", p.id, p.stage, p.message.unwrap_or_default());
+            }
+        };
+
+        if !extras::is_installed(&base, "caddy") {
+            extras::install(&base, "caddy", &show).expect("caddy");
+        }
+        if mysql_manager::pick(&base, "8.4").is_none() {
+            let cat = mysql_manager::catalog(&base).expect("catálogo");
+            let my = cat.iter().find(|r| r.series == "8.4" && r.latest).unwrap().version.clone();
+            mysql_manager::install(&base, &my, &show).expect("mysql");
+        }
+        if crate::tools::pick_php(&base, "8.3").map(|i| !i.managed).unwrap_or(true) {
+            let cat = crate::php_manager::catalog(&base).expect("catálogo do PHP");
+            let php = cat.iter().find(|r| r.minor == "8.3" && r.latest).unwrap().version.clone();
+            crate::php_manager::install(&base, &php, &show).expect("php");
+        }
+        let mk = |id: &str, docroot: &str, http_start: u16, db_start: u16| Project {
+            id: id.into(),
+            name: id.into(),
+            docroot: docroot.into(),
+            php_version: "8.3".into(),
+            db_version: "8.4".into(),
+            http_port: project::free_port(http_start, &Default::default()).unwrap(),
+            db_port: project::free_port(db_start, &Default::default()).unwrap(),
+            db_name: id.into(),
+            created_at: 0,
+            ..Default::default()
+        };
+
+        // 1) Um WordPress auxiliar vira a pasta "do Local".
+        let src = mk("lfsrc", "", 18800, 14100);
+        scaffold(&base, &src).unwrap();
+        let mut run_src = start(&base, &src).expect("start do projeto auxiliar");
+        let opts = crate::wp::WpOptions {
+            title: "Blog do Local".into(),
+            admin_user: "admin".into(),
+            admin_password: "SenhaForte123".into(),
+            admin_email: "admin@example.com".into(),
+            locale: "pt_BR".into(),
+            replace_existing: true,
+        };
+        crate::wp::install_wordpress(&base, &src, &opts, &show).expect("install_wordpress");
+
+        let sql_dir = local.join("app/sql");
+        fs::create_dir_all(&sql_dir).unwrap();
+        let dump = sql_dir.join("local.sql");
+        let mysqldump = mysql_manager::pick(&base, "8.4").unwrap().mysqld.parent().unwrap().join("mysqldump");
+        let out = Command::new(mysqldump)
+            .env("MYSQL_PWD", DB_PASSWORD)
+            .arg("--host=127.0.0.1")
+            .arg(format!("--port={}", src.db_port))
+            .arg(format!("--user={DB_USER}"))
+            .arg(format!("--result-file={}", dump.display()))
+            .arg(&src.db_name)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "mysqldump: {}", String::from_utf8_lossy(&out.stderr));
+        // No Local o site tem outro endereço: troca siteurl/home no dump.
+        let old_url = project::site_url(&src);
+        let mut sql = fs::read_to_string(&dump).unwrap();
+        for name in ["siteurl", "home"] {
+            let (from, to) = (format!("'{name}','{old_url}'"), format!("'{name}','http://snap.local'"));
+            assert!(sql.contains(&from), "o dump não tem {from}");
+            sql = sql.replace(&from, &to);
+        }
+        // Caminho da pasta no Local gravado no banco, serializado (como Wordfence/upload_path).
+        let public = local.join("app/public");
+        let old_path = public.display().to_string();
+        let val = format!("{old_path}/wp-content/uploads");
+        sql.push_str(&format!(
+            "\nINSERT INTO `wp_options` (`option_name`, `option_value`, `autoload`) VALUES ('lt_caminho', 'a:1:{{s:4:\"path\";s:{}:\"{val}\";}}', 'no');\n",
+            val.len()
+        ));
+        fs::write(&dump, sql).unwrap();
+
+        crate::local_import::copy_tree(&docroot_dir(&base, &src), &public, &|_| {}).expect("cópia");
+        stop(&mut run_src);
+        let _ = fs::remove_dir_all(project::project_dir(&base, "lfsrc"));
+        let cfg = fs::read_to_string(public.join("wp-config.php")).unwrap();
+        let cfg: Vec<String> = cfg
+            .lines()
+            .map(|l| {
+                if l.contains("'DB_NAME'") {
+                    "define( 'DB_NAME', 'local' );".to_string()
+                } else if l.contains("'DB_HOST'") {
+                    "define( 'DB_HOST', 'localhost' );".to_string()
+                } else {
+                    l.to_string()
+                }
+            })
+            .collect();
+        fs::write(public.join("wp-config.php"), cfg.join("\n") + "\n").unwrap();
+        // Uma pasta de plugin linkada (como alguns usam no Local).
+        let extra = local.join("plugin-externo");
+        fs::create_dir_all(&extra).unwrap();
+        fs::write(extra.join("leia.txt"), "oi").unwrap();
+        std::os::unix::fs::symlink(&extra, public.join("wp-content/plugins/linkado")).unwrap();
+        // Wordfence: o PHP-FPM carrega este arquivo antes de tudo (precisa apontar para a cópia).
+        fs::write(public.join(".user.ini"), format!("auto_prepend_file = '{old_path}/wordfence-waf.php'\n")).unwrap();
+        fs::write(public.join("wordfence-waf.php"), format!("<?php\n// WFWAF_LOG_PATH: {old_path}/wp-content/wflogs/\n")).unwrap();
+
+        let before = snapshot_tree(&local);
+        let sql_mtime = fs::metadata(&dump).unwrap().modified().unwrap();
+
+        // 2) Projeto novo recebe a pasta.
+        let p = mk("lf", "public", 18850, 14150);
+        scaffold(&base, &p).unwrap();
+        let mut run = start(&base, &p).expect("start do projeto novo");
+        let warning = crate::backup::restore_into(
+            &base,
+            &p,
+            RestoreSource::Folder { public: &public, dump: &dump },
+            "lf",
+            &show,
+        )
+        .expect("restore da pasta");
+        let warning = warning.expect("deveria avisar da pasta linkada");
+        assert!(
+            warning.contains("Pastas que eram links no Local foram copiadas") && warning.contains("wp-content/plugins/linkado"),
+            "{warning}"
+        );
+        let copied = docroot_dir(&base, &p).join("wp-content/plugins/linkado");
+        assert!(fs::symlink_metadata(&copied).unwrap().is_dir(), "o link deveria virar pasta de verdade");
+        assert_eq!(fs::read_to_string(copied.join("leia.txt")).unwrap(), "oi");
+
+        let script = crate::wp::prepare_terminal(&base, &p).expect("terminal");
+        let shims = script.parent().unwrap().join("shims");
+        let out = Command::new("/bin/sh")
+            .arg("-c")
+            .arg(format!("cd '{}' && wp option get siteurl", runtime_docroot(&base, &p)))
+            .env("PATH", format!("{}:/usr/bin:/bin", shims.display()))
+            .output()
+            .unwrap();
+        let text = String::from_utf8_lossy(&out.stdout).to_string();
+        let siteurl = text.lines().rev().map(str::trim).find(|l| l.starts_with("http")).unwrap_or("");
+        assert_eq!(siteurl, project::site_url(&p), "saída: {text}");
+
+        // O caminho do Local sumiu do banco (inclusive do valor serializado) e do .user.ini.
+        let new_path = docroot_dir(&base, &p).display().to_string();
+        let sh_out = |cmd: &str| {
+            let out = Command::new("/bin/sh")
+                .arg("-c")
+                .arg(format!("cd '{}' && {cmd}", runtime_docroot(&base, &p)))
+                .env("PATH", format!("{}:/usr/bin:/bin", shims.display()))
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&out.stdout).to_string()
+        };
+        let opt = sh_out("wp option get lt_caminho --format=json").replace("\\/", "/");
+        assert!(opt.contains(&format!("{new_path}/wp-content/uploads")), "lt_caminho: {opt}");
+        assert!(!opt.contains(&old_path), "lt_caminho ainda tem o caminho do Local: {opt}");
+        let hits = sh_out(&format!(
+            "mysql --skip-column-names -e \"SELECT COUNT(*) FROM wp_options WHERE option_value LIKE '%{old_path}%'\""
+        ));
+        assert_eq!(hits.trim(), "0", "o banco ainda tem o caminho do Local");
+        // A gravação em disco adiada durante a importação volta ao padrão no fim.
+        let durability = sh_out(
+            "mysql --skip-column-names -e \"SELECT @@GLOBAL.innodb_flush_log_at_trx_commit, @@GLOBAL.sync_binlog\"",
+        );
+        assert_eq!(durability.split_whitespace().collect::<Vec<_>>(), ["1", "1"], "durabilidade: {durability}");
+        let ini = fs::read_to_string(docroot_dir(&base, &p).join(".user.ini")).unwrap();
+        assert!(!ini.contains(&old_path) && ini.contains(&new_path), ".user.ini: {ini}");
+        let waf = fs::read_to_string(docroot_dir(&base, &p).join("wordfence-waf.php")).unwrap();
+        assert!(!waf.contains(&old_path), "wordfence-waf.php: {waf}");
+
+        let host = format!("Host: {}:{}\r\n", project::site_host(&p), p.http_port);
+        let home = http_request(p.http_port, "GET", "/", &host, "");
+        assert!(home.contains("200 OK"), "home: {}", home.lines().take(6).collect::<Vec<_>>().join("\n"));
+        assert!(home.contains("Blog do Local"), "título não aparece na home");
+        assert!(!home.contains("snap.local"), "a home ainda aponta para o endereço do Local");
+
+        assert_eq!(snapshot_tree(&local), before, "a pasta do Local foi alterada");
+        assert_eq!(fs::metadata(&dump).unwrap().modified().unwrap(), sql_mtime);
+
+        // 3) Dump inválido: erro, e a origem continua intacta.
+        let bad = std::env::temp_dir().join("localtusk-test-localsite-bad.sql");
+        fs::write(&bad, "THIS IS NOT SQL;\n").unwrap();
+        let err = crate::backup::restore_into(
+            &base,
+            &p,
+            RestoreSource::Folder { public: &public, dump: &bad },
+            "lf",
+            &|_| {},
+        )
+        .unwrap_err();
+        println!("erro esperado: {err}");
+        assert_eq!(fs::read_to_string(&bad).unwrap(), "THIS IS NOT SQL;\n");
+        assert_eq!(snapshot_tree(&local), before, "a pasta do Local foi alterada pela falha");
+        assert_eq!(fs::metadata(&dump).unwrap().modified().unwrap(), sql_mtime);
+
+        stop(&mut run);
+        let _ = fs::remove_file(&bad);
+        let _ = fs::remove_dir_all(project::project_dir(&base, "lf"));
+        let _ = fs::remove_dir_all(&local);
     }
 
     /// Blueprint de verdade: um projeto com arquivo e dados vira modelo, e um segundo projeto
@@ -1843,7 +2196,7 @@ echo 'notas=' . $pdo->query('SELECT COUNT(*) FROM notas')->fetchColumn();
         let b = mk("copia", 18700, 14000);
         scaffold(&base, &b).unwrap();
         let mut run_b = start(&base, &b).expect("start cópia");
-        let warning = crate::backup::restore_into(&base, &b, &path, "bp", &show).expect("restore");
+        let warning = crate::backup::restore_into(&base, &b, crate::backup::RestoreSource::Archive(&path), "bp", &show).expect("restore");
         assert!(warning.is_none(), "aviso inesperado: {warning:?}");
         let body = http_get_path(b.http_port, "/");
         assert!(body.contains("notas=1"), "o novo projeto não herdou os dados: {body}");

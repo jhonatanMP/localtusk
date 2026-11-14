@@ -45,6 +45,12 @@ pub struct Project {
     /// Porta do Redis. 0 = ainda não reservada.
     #[serde(default)]
     pub redis_port: u16,
+    /// O botão do wp-admin entra direto, sem pedir senha (só WordPress).
+    #[serde(default)]
+    pub auto_login: bool,
+    /// Administrador usado pelo login automático. Vazio = ainda não escolhido.
+    #[serde(default)]
+    pub auto_login_user: String,
 }
 
 pub const ENGINE_MYSQL: &str = "mysql";
@@ -215,6 +221,16 @@ pub fn free_port(start: u16, reserved: &HashSet<u16>) -> Option<u16> {
     (start..start.saturating_add(2000)).find(|p| !reserved.contains(p) && port_is_free(*p))
 }
 
+/// `wanted` se estiver livre e não reservada; senão a primeira livre a partir de `start`.
+/// `wanted = 0` significa "qualquer uma" (nunca devolve 0).
+pub fn pick_port(wanted: u16, start: u16, reserved: &HashSet<u16>) -> Option<u16> {
+    if wanted != 0 && !reserved.contains(&wanted) && port_is_free(wanted) {
+        Some(wanted)
+    } else {
+        free_port(start.max(1), reserved)
+    }
+}
+
 /// `n` portas livres e distintas (para serviços que não precisam de porta fixa).
 pub fn ephemeral_ports(n: usize) -> Option<Vec<u16>> {
     // Mantém todos os sockets abertos até o fim para o SO não repetir a mesma porta.
@@ -318,6 +334,14 @@ mod tests {
     }
 
     #[test]
+    fn projeto_antigo_vem_sem_login_automatico() {
+        let old = r#"{"id":"loja","name":"Loja","docroot":"","phpVersion":"","httpPort":8000,"dbPort":3307,"dbName":"loja","createdAt":1}"#;
+        let p: Project = serde_json::from_str(old).unwrap();
+        assert!(!p.auto_login);
+        assert_eq!(p.auto_login_user, "");
+    }
+
+    #[test]
     fn endereco_principal_vira_https_so_com_porta_reservada() {
         let mut p = sample();
         p.https = true;
@@ -374,5 +398,20 @@ mod tests {
             assert!(u.starts_with("http://") && u.ends_with(":8000") || u.starts_with("https://") && u.ends_with(":8443"), "{u}");
             assert!(!u.contains("localhost") && !u.contains("127.0.0.1"), "{u}");
         }
+    }
+
+    #[test]
+    fn pick_port_com_zero_escolhe_uma_porta_livre() {
+        let none = HashSet::new();
+        let p = pick_port(0, 8000, &none).expect("porta");
+        assert_ne!(p, 0);
+        assert!(p >= 8000, "{p}");
+
+        let w = free_port(18900, &none).expect("porta livre");
+        assert_eq!(pick_port(w, 8000, &none), Some(w));
+
+        let reserved: HashSet<u16> = [w].into_iter().collect();
+        let other = pick_port(w, w, &reserved).expect("porta");
+        assert_ne!(other, w);
     }
 }

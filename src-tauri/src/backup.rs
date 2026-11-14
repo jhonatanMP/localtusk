@@ -217,6 +217,58 @@ fn dump_database(base: &Path, p: &Project, out: &Path) -> Result<(), String> {
     }
 }
 
+/// Valores de gravação em disco do MySQL do projeto, guardados para voltar depois.
+struct SavedDurability {
+    flush: String,
+    binlog: String,
+}
+
+fn mysql_query(base: &Path, p: &Project, q: &str) -> Option<String> {
+    let bin = mysql_tool(base, p, "mysql").ok()?;
+    let out = Command::new(&bin)
+        .env("MYSQL_PWD", DB_PASSWORD)
+        .arg("--host=127.0.0.1")
+        .arg(format!("--port={}", p.db_port))
+        .arg(format!("--user={DB_USER}"))
+        .args(["-N", "-B", "-e", q])
+        .stdin(Stdio::null())
+        .output()
+        .ok()?;
+    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// Dumps com um INSERT por linha (como o do Local) e o `wp search-replace` fazem o MySQL
+/// gravar no disco a cada linha, o que deixa a importação até ~15x mais lenta. Enquanto o
+/// conteúdo é trazido, a gravação é adiada (seguro num ambiente local); `restore_durability`
+/// volta ao que era. Melhor esforço: se algo falhar, segue no modo normal.
+fn relax_durability(base: &Path, p: &Project) -> Option<SavedDurability> {
+    if project::is_postgres(p) {
+        return None;
+    }
+    let s = mysql_query(base, p, "SELECT @@GLOBAL.innodb_flush_log_at_trx_commit, @@GLOBAL.sync_binlog")?;
+    let mut it = s.split_whitespace();
+    let saved = SavedDurability { flush: it.next()?.to_string(), binlog: it.next()?.to_string() };
+    let numeric = |v: &str| !v.is_empty() && v.chars().all(|c| c.is_ascii_digit());
+    if !numeric(&saved.flush) || !numeric(&saved.binlog) {
+        return None;
+    }
+    mysql_query(base, p, "SET GLOBAL innodb_flush_log_at_trx_commit=2; SET GLOBAL sync_binlog=0;")?;
+    Some(saved)
+}
+
+fn restore_durability(base: &Path, p: &Project, saved: Option<SavedDurability>) {
+    if let Some(s) = saved {
+        let _ = mysql_query(
+            base,
+            p,
+            &format!(
+                "SET GLOBAL innodb_flush_log_at_trx_commit={}; SET GLOBAL sync_binlog={};",
+                s.flush, s.binlog
+            ),
+        );
+    }
+}
+
 fn import_database(base: &Path, p: &Project, dump: &Path) -> Result<(), String> {
     if project::is_postgres(p) {
         return import_postgres(base, p, dump);
@@ -422,23 +474,93 @@ fn clear_dir(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Restaura o backup dentro do projeto `p`, **substituindo** os arquivos e o banco dele.
-/// O projeto precisa estar rodando. Retorna um aviso se algo secundário falhou.
+/// Arquivos que costumam guardar o caminho absoluto do site (Wordfence, WP Super Cache).
+const PATH_FILES: [&str; 5] = [
+    "wp-config.php",
+    ".user.ini",
+    "wordfence-waf.php",
+    "wp-content/advanced-cache.php",
+    "wp-content/wp-cache-config.php",
+];
+
+/// Formas do caminho da pasta pública de origem como podem estar gravadas no site: a
+/// informada e, se diferente, a real (sem links). Sem barra final.
+fn old_paths(public: &Path) -> Vec<String> {
+    let mut out = vec![public.display().to_string().trim_end_matches('/').to_string()];
+    if let Ok(real) = public.canonicalize() {
+        let real = real.display().to_string().trim_end_matches('/').to_string();
+        if !out.contains(&real) {
+            out.push(real);
+        }
+    }
+    out.retain(|p| !p.is_empty() && p != "/");
+    out
+}
+
+/// Troca os caminhos antigos (`olds`) por `new` nos [`PATH_FILES`] de `docroot` (a cópia
+/// nova; a origem nunca é tocada). Arquivos ausentes são ignorados.
+fn replace_local_paths_in_files(docroot: &Path, olds: &[String], new: &Path) -> Result<(), String> {
+    let new = new.display().to_string();
+    let mut erros = Vec::new();
+    for rel in PATH_FILES {
+        let file = docroot.join(rel);
+        // Só arquivos comuns (a cópia não tem links, mas por garantia não segue nenhum).
+        if !fs::symlink_metadata(&file).is_ok_and(|m| m.file_type().is_file()) {
+            continue;
+        }
+        let Ok(text) = fs::read_to_string(&file) else {
+            continue;
+        };
+        let mut out = text.clone();
+        for old in olds {
+            out = out.replace(old.as_str(), &new);
+        }
+        if out != text
+            && let Err(e) = fs::write(&file, out)
+        {
+            erros.push(format!("{rel}: {e}"));
+        }
+    }
+    if erros.is_empty() { Ok(()) } else { Err(erros.join("; ")) }
+}
+
+/// De onde vêm os arquivos e o banco de uma restauração.
+#[derive(Clone, Copy)]
+pub enum RestoreSource<'a> {
+    Archive(&'a Path),
+    /// Pasta pública pronta + dump SQL (MySQL). Usado pelo importador do Local.
+    Folder { public: &'a Path, dump: &'a Path },
+}
+
+/// Restaura o backup (ou a pasta) dentro do projeto `p`, **substituindo** os arquivos e o
+/// banco dele. O projeto precisa estar rodando. Retorna um aviso se algo secundário falhou.
+/// A origem só é lida, nunca alterada.
 pub fn restore_into(
     base: &Path,
     p: &Project,
-    archive: &Path,
+    source: RestoreSource,
     key: &str,
     progress: &dyn Fn(InstallProgress),
 ) -> Result<Option<String>, String> {
+    let is_folder = matches!(source, RestoreSource::Folder { .. });
     // O dump de um tipo de banco não entra em outro (SQL do MySQL não roda no PostgreSQL).
-    let from = read_manifest(archive)?;
-    let from_engine = if project::valid_engine(&from.db_engine) { from.db_engine.as_str() } else { project::ENGINE_MYSQL };
+    let from_engine = match source {
+        RestoreSource::Archive(archive) => {
+            let from = read_manifest(archive)?;
+            if project::valid_engine(&from.db_engine) { from.db_engine } else { project::ENGINE_MYSQL.to_string() }
+        }
+        RestoreSource::Folder { dump, .. } => {
+            if !dump.is_file() {
+                return Err(format!("O banco de dados não foi encontrado: {}.", dump.display()));
+            }
+            project::ENGINE_MYSQL.to_string()
+        }
+    };
     if from_engine != project::engine_of(p) {
         let label = |e: &str| if e == project::ENGINE_POSTGRES { "PostgreSQL" } else { "MySQL" };
         return Err(format!(
             "Este backup é de um projeto com {} e o projeto de destino usa {}. Restaure como um projeto novo.",
-            label(from_engine),
+            label(&from_engine),
             label(project::engine_of(p))
         ));
     }
@@ -450,41 +572,150 @@ pub fn restore_into(
     fs::create_dir_all(&work).map_err(|e| e.to_string())?;
 
     let result = (|| -> Result<Option<String>, String> {
-        step(progress, key, "Restaurando os arquivos…");
-        clear_dir(&app)?;
-        fs::create_dir_all(&app).map_err(|e| e.to_string())?;
+        let (dump, links_note) = match source {
+            RestoreSource::Archive(archive) => {
+                step(progress, key, "Restaurando os arquivos…");
+                clear_dir(&app)?;
+                fs::create_dir_all(&app).map_err(|e| e.to_string())?;
 
-        let file = File::open(archive).map_err(|e| format!("{}: {e}", archive.display()))?;
-        let mut ar = tar::Archive::new(GzDecoder::new(file));
-        for entry in ar.entries().map_err(|e| e.to_string())? {
-            let mut entry = entry.map_err(|e| format!("backup corrompido: {e}"))?;
-            let path = entry.path().map_err(|e| e.to_string())?.into_owned();
-            // `unpack_in` recusa caminhos que saiam da pasta de destino.
-            if path == Path::new(DUMP) {
-                entry.unpack_in(&work).map_err(|e| e.to_string())?;
-            } else if path.starts_with("app") {
-                entry.unpack_in(&pdir).map_err(|e| format!("{}: {e}", path.display()))?;
+                let file = File::open(archive).map_err(|e| format!("{}: {e}", archive.display()))?;
+                let mut ar = tar::Archive::new(GzDecoder::new(file));
+                for entry in ar.entries().map_err(|e| e.to_string())? {
+                    let mut entry = entry.map_err(|e| format!("backup corrompido: {e}"))?;
+                    let path = entry.path().map_err(|e| e.to_string())?.into_owned();
+                    // `unpack_in` recusa caminhos que saiam da pasta de destino.
+                    if path == Path::new(DUMP) {
+                        entry.unpack_in(&work).map_err(|e| e.to_string())?;
+                    } else if path.starts_with("app") {
+                        entry.unpack_in(&pdir).map_err(|e| format!("{}: {e}", path.display()))?;
+                    }
+                }
+
+                let dump = work.join(DUMP);
+                if !dump.is_file() {
+                    return Err("O backup não contém o banco de dados.".into());
+                }
+                step(progress, key, "Restaurando o banco de dados…");
+                (dump, None)
             }
+            RestoreSource::Folder { public, dump } => {
+                step(progress, key, "Copiando os arquivos…");
+                clear_dir(&app)?;
+                fs::create_dir_all(&app).map_err(|e| e.to_string())?;
+                // Atualiza a contagem a cada 500 arquivos ou a cada segundo (arquivos grandes).
+                let ultimo = std::cell::Cell::new(std::time::Instant::now());
+                let on_file = |n: u64| {
+                    if n.is_multiple_of(500) || ultimo.get().elapsed() >= std::time::Duration::from_secs(1) {
+                        ultimo.set(std::time::Instant::now());
+                        step(progress, key, &format!("Copiando os arquivos… ({n})"));
+                    }
+                };
+                let docroot = runtime::docroot_dir(base, p);
+                let links = crate::local_import::copy_tree(public, &docroot, &on_file)?;
+                // Só as pastas entram no aviso (links para arquivos também foram copiados).
+                let mut notes = Vec::new();
+                if !links.dirs.is_empty() {
+                    notes.push(format!("Pastas que eram links no Local foram copiadas: {}.", links.dirs.join(", ")));
+                }
+                if !links.skipped.is_empty() {
+                    notes.push(format!("Links ignorados (quebrados ou em laço): {}.", links.skipped.join(", ")));
+                }
+                // Antes de qualquer PHP rodar: caminhos do Local em arquivos de configuração
+                // (Wordfence, WP Super Cache) passam a apontar para a cópia nova.
+                if let Err(e) = replace_local_paths_in_files(&docroot, &old_paths(public), &docroot) {
+                    notes.push(format!("Não foi possível trocar o caminho do Local nos arquivos do site: {e}"));
+                }
+                let note = (!notes.is_empty()).then(|| notes.join("\n\n"));
+                step(progress, key, "Importando o banco de dados…");
+                (dump.to_path_buf(), note)
+            }
+        };
+        let saved = relax_durability(base, p);
+        let imported = import_database(base, p, &dump);
+        if let Err(e) = imported {
+            restore_durability(base, p, saved);
+            return Err(e);
         }
 
-        let dump = work.join(DUMP);
-        if !dump.is_file() {
-            return Err("O backup não contém o banco de dados.".into());
-        }
-        step(progress, key, "Restaurando o banco de dados…");
-        import_database(base, p, &dump)?;
-
+        let mut wp_note = None;
         if wp::is_wordpress(base, p) {
             step(progress, key, "Ajustando o WordPress ao novo endereço…");
             if let Err(e) = wp::retarget(base, p, progress) {
-                return Ok(Some(format!(
-                    "O backup foi restaurado, mas não foi possível ajustar o WordPress automaticamente: {e}"
-                )));
+                let what = if is_folder { "O site foi importado" } else { "O backup foi restaurado" };
+                wp_note = Some(format!("{what}, mas não foi possível ajustar o WordPress automaticamente: {e}"));
+            } else if let RestoreSource::Folder { public, .. } = source {
+                // Caminho da pasta no Local gravado no banco (abspath, Wordfence, upload_path…).
+                let new = runtime::docroot_dir(base, p).display().to_string();
+                for old in old_paths(public) {
+                    if let Err(e) = wp::search_replace_all(base, p, &old, &new, progress) {
+                        wp_note = Some(format!(
+                            "O site foi importado, mas não foi possível trocar o caminho do Local no banco: {e}"
+                        ));
+                        break;
+                    }
+                }
             }
         }
-        Ok(None)
+        restore_durability(base, p, saved);
+        Ok(match (links_note, wp_note) {
+            (Some(l), Some(w)) => Some(format!("{l}\n\n{w}")),
+            (l, w) => l.or(w),
+        })
     })();
 
     let _ = fs::remove_dir_all(&work);
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_base(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("localtusk-bk-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn troca_caminho_do_local_nos_arquivos_da_copia() {
+        let base = temp_base("caminhos");
+        let origem = base.join("Local Sites/snap/app/public");
+        fs::create_dir_all(origem.join("wp-content")).unwrap();
+        let ini = format!("auto_prepend_file = '{}/wordfence-waf.php'\n", origem.display());
+        fs::write(origem.join(".user.ini"), &ini).unwrap();
+
+        let novo = base.join("proj/app/public");
+        fs::create_dir_all(novo.join("wp-content")).unwrap();
+        fs::write(novo.join(".user.ini"), &ini).unwrap();
+        fs::write(novo.join("wp-config.php"), format!("define('WPCACHEHOME', '{}/wp-content/plugins/wp-super-cache/');\n", origem.display())).unwrap();
+        fs::write(novo.join("wp-content/advanced-cache.php"), "<?php // nada\n").unwrap();
+        fs::write(novo.join("outro.php"), origem.display().to_string()).unwrap();
+
+        replace_local_paths_in_files(&novo, &old_paths(&origem), &novo).unwrap();
+        let o = origem.display().to_string();
+        let n = novo.display().to_string();
+        let ini_novo = fs::read_to_string(novo.join(".user.ini")).unwrap();
+        assert_eq!(ini_novo, format!("auto_prepend_file = '{n}/wordfence-waf.php'\n"));
+        let cfg = fs::read_to_string(novo.join("wp-config.php")).unwrap();
+        assert!(cfg.contains(&format!("'{n}/wp-content/plugins/wp-super-cache/'")) && !cfg.contains(&o));
+        assert_eq!(fs::read_to_string(novo.join("wp-content/advanced-cache.php")).unwrap(), "<?php // nada\n");
+        // Só os arquivos conhecidos são tocados; a origem fica igual.
+        assert_eq!(fs::read_to_string(novo.join("outro.php")).unwrap(), o);
+        assert_eq!(fs::read_to_string(origem.join(".user.ini")).unwrap(), ini);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn caminho_antigo_inclui_o_real_sem_links() {
+        // Caminho real da pasta temporária (no macOS, /var é um link para /private/var).
+        let base = temp_base("real").canonicalize().unwrap();
+        fs::create_dir_all(base.join("real/public")).unwrap();
+        std::os::unix::fs::symlink(base.join("real"), base.join("link")).unwrap();
+        let olds = old_paths(&base.join("link/public/"));
+        assert_eq!(olds[0], base.join("link/public").display().to_string());
+        assert!(olds.contains(&base.join("real/public").canonicalize().unwrap().display().to_string()));
+        assert_eq!(old_paths(&base.join("real/public")).len(), 1);
+    }
 }
